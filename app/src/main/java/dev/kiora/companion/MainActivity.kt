@@ -73,18 +73,16 @@ class MainActivity : Activity() {
         status.text = "正在加载会话…"
         scope.launch {
             try {
-                val report = LegacyStorageMigrator(this@MainActivity, CompanionDatabase.get(this@MainActivity)).migrate()
                 currentConversationId = conversations.currentId()
                 showConversation()
-                if (report.skipped > 0) status.text = "有 ${report.skipped} 项旧记录未能导入，原文件仍保留"
-                else if (settings.getBoolean("had_secret", false)) {
+                if (settings.getBoolean("had_secret", false)) {
                     status.text = "打开设置，重新输入本次运行的密钥"
                 } else if (settings.getString("model_url", "").orEmpty().isNotBlank() ||
                     settings.getString("card_url", "").orEmpty().isNotBlank()) {
                     connect(savedConfig())
                 } else status.text = "设置模型或连接电脑端 Agent"
             } catch (error: Exception) {
-                status.text = "会话迁移失败：${error.message ?: "请检查存储"}"
+                status.text = "加载会话失败：${error.message ?: "请检查存储"}"
             }
         }
     }

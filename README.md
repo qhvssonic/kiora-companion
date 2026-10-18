@@ -12,7 +12,7 @@
 - 显示远端处理进度和结果；电脑端要求补充信息时，下一条消息继续同一远端任务。
 - 使用同一个 Room 数据库保存会话列表、界面文本记录、SDK 会话树及待继续的 A2A 任务 ID；附件内容不保存在会话中。模型密钥和 A2A Token 只在当前进程中保留。
 
-首次升级会把原有 `companion_history` 中的历史对话和 `files/agent-sessions` 中的 JSONL 会话导入 Room。导入在同一数据库事务中完成，只运行一次；旧数据会保留，便于核对和恢复。新建会话仅写入 Room。数据库结构定义保存在 `app/schemas/`，后续修改结构需要提供 Room 迁移。
+会话数据直接写入 Room，不读取旧版 SharedPreferences 对话或 JSONL 会话。数据库结构定义保存在 `app/schemas/`。
 
 附件总大小上限为 10 MiB。电脑端 Agent 必须能接收 A2A 1.x HTTP+JSON 或 JSONRPC，并处理 `raw` 附件。Debug APK 允许局域网 HTTP；正式构建应使用 HTTPS。
 
