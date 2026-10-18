@@ -6,6 +6,7 @@
         android:icon="@drawable/kiora_logo"
         android:label="Kiora Companion"
         android:theme="@style/AppTheme">
+        <activity android:name=".SettingsActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

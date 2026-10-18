@@ -9,7 +9,9 @@ import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.text.Editable
 import android.text.InputType
+import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -44,6 +46,10 @@ class MainActivity : Activity() {
     private lateinit var attachmentStrip: LinearLayout
     private lateinit var attachmentContainer: View
     private lateinit var status: TextView
+    private lateinit var modelIndicator: TextView
+    private lateinit var drawerOverlay: FrameLayout
+    private lateinit var drawerList: LinearLayout
+    private lateinit var drawerSearch: EditText
     private val selectedUris = mutableListOf<Uri>()
     private var streamView: TextView? = null
     private var activeConfig: CompanionConfig? = null
@@ -75,7 +81,9 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(BG)
         }
-        setContentView(root)
+        val host = FrameLayout(this)
+        setContentView(host)
+        host.addView(root, FrameLayout.LayoutParams(-1, -1))
 
         val header = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
@@ -83,13 +91,28 @@ class MainActivity : Activity() {
         }
         root.addView(header, LinearLayout.LayoutParams(-1, dp(58)))
         header.addView(iconButton("☰", "历史会话") { showHistory() }, LinearLayout.LayoutParams(dp(44), dp(44)))
-        header.addView(TextView(this).apply {
+        val identity = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setOnClickListener { chooseHeaderModel() }
+        }
+        header.addView(identity, LinearLayout.LayoutParams(0, -1, 1f))
+        identity.addView(TextView(this).apply {
             text = "Kiora"
-            textSize = 19f
+            textSize = 18f
             setTextColor(INK)
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
-        }, LinearLayout.LayoutParams(0, -1, 1f))
+        })
+        modelIndicator = TextView(this).apply {
+            textSize = 11f
+            setTextColor(MUTED)
+            gravity = Gravity.CENTER
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        identity.addView(modelIndicator, LinearLayout.LayoutParams(-1, dp(18)))
+        updateModelIndicator()
         header.addView(iconButton("✎", "新会话") { newConversation() }, LinearLayout.LayoutParams(dp(44), dp(44)))
         header.addView(iconButton("⚙", "设置") { showSettings() }, LinearLayout.LayoutParams(dp(44), dp(44)))
 
@@ -165,6 +188,7 @@ class MainActivity : Activity() {
             setOnClickListener { sendMessage() }
         }
         composerShell.addView(sendButton, LinearLayout.LayoutParams(dp(40), dp(40)))
+        buildDrawer(host)
     }
 
     private fun buildEmptyState(): View = LinearLayout(this).apply {
@@ -354,6 +378,16 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (resultCode != RESULT_OK || data == null) return
+        if (requestCode == SETTINGS) {
+            val config = CompanionConfig(
+                data.getStringExtra("model_url").orEmpty(), data.getStringExtra("model_id").orEmpty(),
+                data.getStringExtra("api_key").orEmpty(), data.getStringExtra("card_url").orEmpty(),
+                data.getStringExtra("a2a_token").orEmpty(),
+            )
+            updateModelIndicator()
+            scope.launch { connect(config) }
+            return
+        }
         if (requestCode != PICK_PHOTOS && requestCode != PICK_FILES) return
         data.data?.let { selectedUris.add(it) }
         data.clipData?.let { clip ->
@@ -388,18 +422,147 @@ class MainActivity : Activity() {
     }.getOrDefault("附件")
 
     private fun showHistory() {
-        val recent = conversations.sessions()
-        val labels = listOf("＋ 新会话") + recent.map { it.title }
-        AlertDialog.Builder(this).setTitle("历史会话")
-            .setItems(labels.toTypedArray()) { _, index ->
-                if (index == 0) newConversation() else {
-                    conversations.currentId = recent[index - 1].id
-                    showConversation()
+        drawerSearch.text.clear()
+        renderHistory("")
+        drawerOverlay.visibility = View.VISIBLE
+    }
+
+    private fun buildDrawer(host: FrameLayout) {
+        drawerOverlay = FrameLayout(this).apply {
+            visibility = View.GONE
+            setBackgroundColor(0x66000000)
+            setOnClickListener { hideHistory() }
+        }
+        host.addView(drawerOverlay, FrameLayout.LayoutParams(-1, -1))
+        val width = (resources.displayMetrics.widthPixels * 0.84f).toInt()
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.WHITE)
+            setOnClickListener { }
+            setPadding(dp(16), dp(20), dp(16), dp(16))
+            elevation = dp(12).toFloat()
+        }
+        drawerOverlay.addView(panel, FrameLayout.LayoutParams(width, -1, Gravity.LEFT))
+        val brand = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        panel.addView(brand, LinearLayout.LayoutParams(-1, dp(54)))
+        brand.addView(ImageView(this).apply {
+            setImageResource(R.drawable.kiora_logo)
+        }, LinearLayout.LayoutParams(dp(32), dp(32)))
+        brand.addView(TextView(this).apply {
+            text = "Kiora"
+            textSize = 20f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(INK)
+            setPadding(dp(10), 0, 0, 0)
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        brand.addView(iconButton("×", "关闭侧边栏") { hideHistory() }, LinearLayout.LayoutParams(dp(40), dp(40)))
+
+        panel.addView(TextView(this).apply {
+            text = "＋   新对话"
+            textSize = 16f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(INK)
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), 0, 0, 0)
+            background = rounded(USER_BUBBLE, 15)
+            setOnClickListener { newConversation() }
+        }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(12); bottomMargin = dp(14) })
+
+        drawerSearch = EditText(this).apply {
+            hint = "搜索对话"
+            textSize = 14f
+            setTextColor(INK)
+            setHintTextColor(MUTED)
+            setSingleLine(true)
+            setPadding(dp(15), 0, dp(15), 0)
+            background = rounded(BG, 14, STROKE)
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    renderHistory(s?.toString().orEmpty())
                 }
-            }.show()
+                override fun afterTextChanged(s: Editable?) = Unit
+            })
+        }
+        panel.addView(drawerSearch, LinearLayout.LayoutParams(-1, dp(44)))
+        panel.addView(TextView(this).apply {
+            text = "最近对话"
+            textSize = 12f
+            setTextColor(MUTED)
+            setPadding(dp(8), dp(23), 0, dp(11))
+        })
+        val scroll = ScrollView(this).apply { isFillViewport = true }
+        panel.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        drawerList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        scroll.addView(drawerList)
+
+        panel.addView(View(this).apply { setBackgroundColor(STROKE) },
+            LinearLayout.LayoutParams(-1, dp(1)).apply { topMargin = dp(10) })
+        panel.addView(TextView(this).apply {
+            text = "⚙   模型与连接设置"
+            textSize = 15f
+            setTextColor(INK)
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), 0, 0, 0)
+            setOnClickListener { hideHistory(); showSettings() }
+        }, LinearLayout.LayoutParams(-1, dp(56)))
+    }
+
+    private fun renderHistory(query: String) {
+        drawerList.removeAllViews()
+        val recent = conversations.sessions().filter { it.title.contains(query, ignoreCase = true) }
+        if (recent.isEmpty()) {
+            drawerList.addView(TextView(this).apply {
+                text = if (query.isBlank()) "还没有对话，开始一个新对话吧" else "没有找到相关对话"
+                textSize = 14f
+                setTextColor(MUTED)
+                setPadding(dp(12), dp(12), dp(12), dp(12))
+            })
+        }
+        recent.forEach { session ->
+            val selected = session.id == conversations.currentId
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(14), dp(7), dp(12), dp(7))
+                background = rounded(if (selected) USER_BUBBLE else Color.WHITE, 14)
+                setOnClickListener {
+                    conversations.currentId = session.id
+                    showConversation()
+                    hideHistory()
+                }
+            }
+            drawerList.addView(row, LinearLayout.LayoutParams(-1, dp(66)).apply { bottomMargin = dp(4) })
+            row.addView(TextView(this).apply {
+                text = session.title.lineSequence().firstOrNull().orEmpty()
+                textSize = 15f
+                typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+                setTextColor(INK)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            })
+            row.addView(TextView(this).apply {
+                text = conversations.lines(session.id).lastOrNull()?.text?.replace('\n', ' ')?.take(45).orEmpty()
+                textSize = 12f
+                setTextColor(MUTED)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                setPadding(0, dp(3), 0, 0)
+            })
+        }
+    }
+
+    private fun hideHistory() {
+        drawerOverlay.visibility = View.GONE
+    }
+
+    @Deprecated("Back press delegates to the navigation drawer")
+    override fun onBackPressed() {
+        if (drawerOverlay.visibility == View.VISIBLE) hideHistory() else super.onBackPressed()
     }
 
     private fun newConversation() {
+        hideHistory()
         conversations.newConversation()
         selectedUris.clear()
         showAttachments()
@@ -408,47 +571,52 @@ class MainActivity : Activity() {
     }
 
     private fun showSettings() {
-        val panel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(8), dp(20), dp(6))
+        startActivityForResult(Intent(this, SettingsActivity::class.java).apply {
+            putExtra("api_key", activeConfig?.apiKey.orEmpty())
+            putExtra("a2a_token", activeConfig?.a2aToken.orEmpty())
+        }, SETTINGS)
+    }
+
+    private fun chooseHeaderModel() {
+        if (busy) return
+        if (settings.getBoolean("had_secret", false) && activeConfig == null) {
+            showSettings()
+            return
         }
-        val modelUrl = settingField(panel, "模型站点地址", "https://example.com", settings.getString("model_url", "").orEmpty())
-        val modelId = settingField(panel, "模型 ID", "模型服务提供的名称", settings.getString("model_id", "").orEmpty())
-        val apiKey = settingField(panel, "模型 API Key（仅本次运行）", "可选", activeConfig?.apiKey.orEmpty(), true)
-        val cardUrl = settingField(panel, "电脑端 Agent Card", "http://192.168.1.5:9999/.well-known/agent-card.json",
-            settings.getString("card_url", "").orEmpty())
-        val token = settingField(panel, "A2A Bearer Token（仅本次运行）", "可选", activeConfig?.a2aToken.orEmpty(), true)
-        val scroll = ScrollView(this).apply { addView(panel) }
-        AlertDialog.Builder(this).setTitle("连接设置")
-            .setView(scroll)
-            .setNegativeButton("取消", null)
-            .setPositiveButton("保存并连接") { _, _ ->
-                val config = CompanionConfig(
-                    modelUrl.text.toString().trim(), modelId.text.toString().trim(), apiKey.text.toString().trim(),
-                    cardUrl.text.toString().trim(), token.text.toString().trim(),
-                )
-                settings.edit().putString("model_url", config.modelUrl).putString("model_id", config.modelId)
-                    .putString("card_url", config.agentCardUrl)
-                    .putBoolean("had_secret", config.apiKey.isNotBlank() || config.a2aToken.isNotBlank()).apply()
-                scope.launch { connect(config) }
+        val provider = ProviderCatalog.byId(settings.getString("provider_id", null)).let {
+            if (settings.contains("provider_id")) it
+            else ProviderCatalog.infer(settings.getString("model_url", "").orEmpty())
+        }
+        if (provider.models.isEmpty()) {
+            showSettings()
+            return
+        }
+        val choices = provider.models + "更多模型与提供商…"
+        AlertDialog.Builder(this).setTitle("选择模型")
+            .setSingleChoiceItems(choices.toTypedArray(), provider.models.indexOf(settings.getString("model_id", "")))
+            { dialog, index ->
+                dialog.dismiss()
+                if (index == provider.models.size) showSettings()
+                else {
+                    val current = activeConfig ?: savedConfig()
+                    val updated = current.copy(modelUrl = provider.endpoint, modelId = provider.models[index])
+                    settings.edit().putString("model_url", updated.modelUrl)
+                        .putString("model_id", updated.modelId).putString("provider_id", provider.id).apply()
+                    updateModelIndicator()
+                    scope.launch { connect(updated) }
+                }
             }.show()
     }
 
-    private fun settingField(parent: LinearLayout, label: String, hintText: String, value: String,
-        secret: Boolean = false): EditText {
-        parent.addView(TextView(this).apply {
-            text = label
-            textSize = 13f
-            setTextColor(MUTED)
-        }, LinearLayout.LayoutParams(-1, dp(28)).apply { topMargin = dp(7) })
-        return EditText(this).also { field ->
-            field.setText(value)
-            field.hint = hintText
-            field.textSize = 15f
-            field.setSingleLine(true)
-            field.inputType = if (secret) InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-                else InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-            parent.addView(field, LinearLayout.LayoutParams(-1, dp(48)))
+    private fun updateModelIndicator() {
+        val model = settings.getString("model_id", "").orEmpty()
+        val endpoint = settings.getString("model_url", "").orEmpty()
+        val provider = if (settings.contains("provider_id")) ProviderCatalog.byId(settings.getString("provider_id", null))
+            else ProviderCatalog.infer(endpoint)
+        modelIndicator.text = when {
+            model.isNotBlank() -> "${provider.name} · $model  ⌄"
+            provider.id == "none" -> "电脑端 Agent  ⌄"
+            else -> "选择模型  ⌄"
         }
     }
 
@@ -462,6 +630,7 @@ class MainActivity : Activity() {
         try {
             status.text = agent.configure(config)
             activeConfig = config
+            updateModelIndicator()
         }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) { status.text = "连接失败：${error.message ?: "请检查地址"}" }
@@ -495,6 +664,7 @@ class MainActivity : Activity() {
     private companion object {
         const val PICK_PHOTOS = 11
         const val PICK_FILES = 12
+        const val SETTINGS = 13
         const val BG = 0xFFFAFAF8.toInt()
         const val INK = 0xFF20201F.toInt()
         const val MUTED = 0xFF777773.toInt()
