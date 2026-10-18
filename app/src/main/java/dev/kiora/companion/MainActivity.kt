@@ -91,13 +91,28 @@ class MainActivity : Activity() {
         }
         root.addView(header, LinearLayout.LayoutParams(-1, dp(58)))
         header.addView(iconButton("☰", "历史会话") { showHistory() }, LinearLayout.LayoutParams(dp(44), dp(44)))
-        header.addView(TextView(this).apply {
+        val identity = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setOnClickListener { chooseHeaderModel() }
+        }
+        header.addView(identity, LinearLayout.LayoutParams(0, -1, 1f))
+        identity.addView(TextView(this).apply {
             text = "Kiora"
             textSize = 18f
             setTextColor(INK)
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
-        }, LinearLayout.LayoutParams(0, -1, 1f))
+        })
+        modelIndicator = TextView(this).apply {
+            textSize = 11f
+            setTextColor(MUTED)
+            gravity = Gravity.CENTER
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        identity.addView(modelIndicator, LinearLayout.LayoutParams(-1, dp(18)))
+        updateModelIndicator()
         header.addView(iconButton("✎", "新会话") { newConversation() }, LinearLayout.LayoutParams(dp(44), dp(44)))
         header.addView(iconButton("⚙", "设置") { showSettings() }, LinearLayout.LayoutParams(dp(44), dp(44)))
 
@@ -138,8 +153,8 @@ class MainActivity : Activity() {
         selectedScroll.addView(attachmentStrip)
 
         val composerShell = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(10), dp(7), dp(10), dp(7))
+            gravity = Gravity.BOTTOM or Gravity.CENTER_VERTICAL
+            setPadding(dp(7), dp(5), dp(7), dp(5))
             background = rounded(Color.WHITE, 27, STROKE)
         }
         val composerOuter = LinearLayout(this).apply {
@@ -148,6 +163,8 @@ class MainActivity : Activity() {
         }
         root.addView(composerOuter)
         composerOuter.addView(composerShell, LinearLayout.LayoutParams(-1, -2))
+        composerShell.addView(iconButton("+", "添加照片或文件") { showAttachmentMenu() },
+            LinearLayout.LayoutParams(dp(42), dp(42)))
         composer = EditText(this).apply {
             hint = "给 Kiora 发消息"
             textSize = 16f
@@ -158,31 +175,9 @@ class MainActivity : Activity() {
             maxLines = 5
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or
                 InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-            setPadding(dp(8), dp(5), dp(8), dp(5))
+            setPadding(dp(3), dp(8), dp(4), dp(8))
         }
-        composerShell.addView(composer, LinearLayout.LayoutParams(-1, -2))
-        val composerTools = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        composerShell.addView(composerTools, LinearLayout.LayoutParams(-1, dp(42)))
-        composerTools.addView(iconButton("+", "添加照片或文件") { showAttachmentMenu() },
-            LinearLayout.LayoutParams(dp(42), dp(42)))
-        modelIndicator = TextView(this).apply {
-            textSize = 12f
-            setTextColor(INK)
-            gravity = Gravity.CENTER_VERTICAL
-            maxLines = 1
-            maxWidth = dp(240)
-            ellipsize = android.text.TextUtils.TruncateAt.END
-            setPadding(dp(12), 0, dp(12), 0)
-            background = rounded(USER_BUBBLE, 16)
-            contentDescription = "选择模型"
-            setOnClickListener { chooseComposerModel() }
-        }
-        composerTools.addView(modelIndicator, LinearLayout.LayoutParams(-2, dp(34)).apply {
-            leftMargin = dp(5)
-            rightMargin = dp(8)
-        })
-        composerTools.addView(View(this), LinearLayout.LayoutParams(0, dp(1), 1f))
-        updateModelIndicator()
+        composerShell.addView(composer, LinearLayout.LayoutParams(0, -2, 1f))
         sendButton = TextView(this).apply {
             text = "↑"
             contentDescription = "发送"
@@ -192,7 +187,7 @@ class MainActivity : Activity() {
             background = rounded(INK, 24)
             setOnClickListener { sendMessage() }
         }
-        composerTools.addView(sendButton, LinearLayout.LayoutParams(dp(40), dp(40)))
+        composerShell.addView(sendButton, LinearLayout.LayoutParams(dp(40), dp(40)))
         buildDrawer(host)
     }
 
@@ -582,7 +577,7 @@ class MainActivity : Activity() {
         }, SETTINGS)
     }
 
-    private fun chooseComposerModel() {
+    private fun chooseHeaderModel() {
         if (busy) return
         if (settings.getBoolean("had_secret", false) && activeConfig == null) {
             showSettings()
@@ -622,11 +617,6 @@ class MainActivity : Activity() {
             model.isNotBlank() -> "${provider.name} · $model  ⌄"
             provider.id == "none" -> "电脑端 Agent  ⌄"
             else -> "选择模型  ⌄"
-        }
-        modelIndicator.contentDescription = when {
-            model.isNotBlank() -> "当前模型：${provider.name} $model，点按切换"
-            provider.id == "none" -> "仅电脑端 Agent，点按更改"
-            else -> "选择模型"
         }
     }
 
