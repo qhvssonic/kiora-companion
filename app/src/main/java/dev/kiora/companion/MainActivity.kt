@@ -37,6 +37,7 @@ class MainActivity : Activity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val settings by lazy { getSharedPreferences("companion_settings", MODE_PRIVATE) }
     private val conversations by lazy { ConversationRepository(this) }
+    private val markdown by lazy { MessageMarkdown(this) }
     private lateinit var agent: CompanionAgent
     private lateinit var transcript: LinearLayout
     private lateinit var transcriptScroll: ScrollView
@@ -52,6 +53,8 @@ class MainActivity : Activity() {
     private lateinit var drawerSearch: EditText
     private val selectedUris = mutableListOf<Uri>()
     private var streamView: TextView? = null
+    private val streamSource = StringBuilder()
+    private var pendingStreamRender: Runnable? = null
     private var activeConfig: CompanionConfig? = null
     private var busy = false
 
@@ -242,7 +245,7 @@ class MainActivity : Activity() {
     }
 
     private fun showConversation() {
-        streamView = null
+        clearStream()
         transcript.removeAllViews()
         conversations.lines(conversations.currentId).forEach(::addLine)
         emptyState.visibility = if (transcript.childCount == 0) View.VISIBLE else View.GONE
@@ -263,7 +266,6 @@ class MainActivity : Activity() {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
         }, LinearLayout.LayoutParams(dp(31), dp(34)))
         return TextView(this).apply {
-            text = line.text
             textSize = 16f
             setTextColor(INK)
             setTextIsSelectable(true)
@@ -275,13 +277,34 @@ class MainActivity : Activity() {
             val maxWidth = resources.displayMetrics.widthPixels - dp(if (line.role == "user") 72 else 76)
             row.addView(this, LinearLayout.LayoutParams(-2, -2).apply { width = ViewGroup.LayoutParams.WRAP_CONTENT })
             this.maxWidth = maxWidth
+            if (line.role == "user") text = line.text else markdown.render(this, line.text)
         }.also { scrollToBottom() }
     }
 
     private fun showDelta(delta: String) {
-        val view = streamView ?: addLine(ChatLine("assistant", "")).also { streamView = it }
-        view.append(delta)
-        scrollToBottom()
+        val view = streamView ?: addLine(ChatLine("assistant", "")).also {
+            streamView = it
+            streamSource.setLength(0)
+        }
+        streamSource.append(delta)
+        if (pendingStreamRender == null) {
+            val render = Runnable {
+                pendingStreamRender = null
+                if (streamView === view) {
+                    markdown.render(view, streamSource.toString())
+                    scrollToBottom()
+                }
+            }
+            pendingStreamRender = render
+            view.postDelayed(render, 80)
+        }
+    }
+
+    private fun clearStream() {
+        pendingStreamRender?.let { render -> streamView?.removeCallbacks(render) }
+        pendingStreamRender = null
+        streamView = null
+        streamSource.setLength(0)
     }
 
     private fun scrollToBottom() { transcriptScroll.post { transcriptScroll.fullScroll(View.FOCUS_DOWN) } }
@@ -329,8 +352,9 @@ class MainActivity : Activity() {
             try {
                 val reply = agent.send(id, instruction, files)
                 if (streamView != null) {
-                    streamView!!.text = reply
-                    streamView = null
+                    val view = streamView!!
+                    clearStream()
+                    markdown.render(view, reply)
                 } else addLine(ChatLine("assistant", reply))
                 conversations.append(id, ChatLine("assistant", reply))
                 selectedUris.clear()
@@ -339,7 +363,7 @@ class MainActivity : Activity() {
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                streamView = null
+                clearStream()
                 status.text = "发送失败：${error.message ?: "未知错误"}"
                 addLine(ChatLine("assistant", "发送失败：${error.message ?: "请检查连接后重试"}"))
             } finally {

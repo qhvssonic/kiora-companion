@@ -27,4 +27,8 @@ dependencies {
     implementation("dev.kiora:kiora-a2a:0.3.0-SNAPSHOT")
     implementation("dev.kiora:kiora-android-attachments:0.3.0-SNAPSHOT")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("io.noties.markwon:core:4.6.2")
+    implementation("io.noties.markwon:ext-tables:4.6.2")
+    implementation("io.noties.markwon:ext-strikethrough:4.6.2")
+    implementation("io.noties.markwon:ext-tasklist:4.6.2")
 }

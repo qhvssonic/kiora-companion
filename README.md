@@ -7,6 +7,7 @@
 - 在设置页选择 DeepSeek、OpenAI、仅电脑端 Agent 或其他兼容服务。预置提供商自动填入 Chat Completions 地址和模型候选；其他服务可填写自己的地址与模型 ID。聊天顶部显示当前模型，并可直接切换预置模型。
 - 可同时配置模型和电脑端 A2A Agent Card；自定义模型站点地址可只填 `https://example.com`，SDK 会补全 `/v1/chat/completions`。
 - 纯文字消息通过 Kiora `AgentRuntime` 运行，模型可按 Agent Card 中的 skill 调用电脑端能力。
+- 助手回复以 Android 原生文本渲染 Markdown，支持标题、列表、链接、引用、代码块、表格、删除线和任务清单；流式回复与历史会话使用同一排版。
 - 通过系统选择器选照片或文件，确认目标 Agent 和文件名后，使用 Kiora 附件模块读取并发送 A2A `raw` Part。
 - 显示远端处理进度和结果；电脑端要求补充信息时，下一条消息继续同一远端任务。
 - 本地保存会话列表与文本记录；附件内容不保存在会话中。模型密钥和 A2A Token 只在当前进程中保留。
