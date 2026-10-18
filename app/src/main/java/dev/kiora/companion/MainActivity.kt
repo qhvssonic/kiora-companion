@@ -27,6 +27,7 @@ import dev.kiora.core.ToolCall
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -56,6 +57,10 @@ class MainActivity : Activity() {
     private val streamSource = StringBuilder()
     private var pendingStreamRender: Runnable? = null
     private var activeConfig: CompanionConfig? = null
+    private var currentConversationId: String? = null
+    private var historyJob: Job? = null
+    private var conversationJob: Job? = null
+    private var conversationLoading = true
     private var busy = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -65,12 +70,22 @@ class MainActivity : Activity() {
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         agent = CompanionAgent(this, ::confirmTool, ::showDelta) { status.text = it }
         buildUi()
-        showConversation()
-        if (settings.getBoolean("had_secret", false)) {
-            status.text = "打开设置，重新输入本次运行的密钥"
-        } else if (settings.getString("model_url", "").orEmpty().isNotBlank() ||
-            settings.getString("card_url", "").orEmpty().isNotBlank()) {
-            scope.launch { connect(savedConfig()) }
+        status.text = "正在加载会话…"
+        scope.launch {
+            try {
+                val report = LegacyStorageMigrator(this@MainActivity, CompanionDatabase.get(this@MainActivity)).migrate()
+                currentConversationId = conversations.currentId()
+                showConversation()
+                if (report.skipped > 0) status.text = "有 ${report.skipped} 项旧记录未能导入，原文件仍保留"
+                else if (settings.getBoolean("had_secret", false)) {
+                    status.text = "打开设置，重新输入本次运行的密钥"
+                } else if (settings.getString("model_url", "").orEmpty().isNotBlank() ||
+                    settings.getString("card_url", "").orEmpty().isNotBlank()) {
+                    connect(savedConfig())
+                } else status.text = "设置模型或连接电脑端 Agent"
+            } catch (error: Exception) {
+                status.text = "会话迁移失败：${error.message ?: "请检查存储"}"
+            }
         }
     }
 
@@ -245,11 +260,25 @@ class MainActivity : Activity() {
     }
 
     private fun showConversation() {
+        val id = currentConversationId ?: return
         clearStream()
         transcript.removeAllViews()
-        conversations.lines(conversations.currentId).forEach(::addLine)
-        emptyState.visibility = if (transcript.childCount == 0) View.VISIBLE else View.GONE
-        scrollToBottom()
+        emptyState.visibility = View.GONE
+        conversationLoading = true
+        conversationJob?.cancel()
+        conversationJob = scope.launch {
+            try {
+                val lines = conversations.lines(id)
+                if (currentConversationId == id) {
+                    lines.forEach(::addLine)
+                    emptyState.visibility = if (transcript.childCount == 0) View.VISIBLE else View.GONE
+                    conversationLoading = false
+                    scrollToBottom()
+                }
+            } catch (error: Exception) {
+                status.text = "读取会话失败：${error.message ?: "请重试"}"
+            }
+        }
     }
 
     private fun addLine(line: ChatLine): TextView {
@@ -311,6 +340,10 @@ class MainActivity : Activity() {
 
     private fun sendMessage() {
         if (busy) return
+        if (currentConversationId == null || conversationLoading) {
+            status.text = "正在加载会话，请稍候"
+            return
+        }
         val instruction = composer.text.toString().trim()
         if (instruction.isBlank() && selectedUris.isEmpty()) return
         if (!agent.isConfigured) {
@@ -336,13 +369,12 @@ class MainActivity : Activity() {
 
     private fun performSend(instruction: String) {
         val files = selectedUris.toList()
-        val id = conversations.currentId
+        val id = currentConversationId ?: return
         val shown = buildString {
             append(instruction.ifBlank { "请处理这些附件" })
             if (files.isNotEmpty()) append("\n").append(files.joinToString("  ") { "📎 ${displayName(it)}" })
         }
         val user = ChatLine("user", shown)
-        conversations.append(id, user)
         addLine(user)
         composer.text.clear()
         busy = true
@@ -350,6 +382,7 @@ class MainActivity : Activity() {
         status.text = "正在处理…"
         scope.launch {
             try {
+                conversations.append(id, user)
                 val reply = agent.send(id, instruction, files)
                 if (streamView != null) {
                     val view = streamView!!
@@ -446,9 +479,10 @@ class MainActivity : Activity() {
     }.getOrDefault("附件")
 
     private fun showHistory() {
+        if (busy || currentConversationId == null) return
         drawerSearch.text.clear()
-        renderHistory("")
         drawerOverlay.visibility = View.VISIBLE
+        renderHistory("")
     }
 
     private fun buildDrawer(host: FrameLayout) {
@@ -533,8 +567,15 @@ class MainActivity : Activity() {
     }
 
     private fun renderHistory(query: String) {
+        historyJob?.cancel()
+        historyJob = scope.launch {
+            val recent = conversations.sessions(query)
+            if (drawerOverlay.visibility == View.VISIBLE) drawHistory(query, recent)
+        }
+    }
+
+    private fun drawHistory(query: String, recent: List<ChatSession>) {
         drawerList.removeAllViews()
-        val recent = conversations.sessions().filter { it.title.contains(query, ignoreCase = true) }
         if (recent.isEmpty()) {
             drawerList.addView(TextView(this).apply {
                 text = if (query.isBlank()) "还没有对话，开始一个新对话吧" else "没有找到相关对话"
@@ -544,16 +585,20 @@ class MainActivity : Activity() {
             })
         }
         recent.forEach { session ->
-            val selected = session.id == conversations.currentId
+            val selected = session.id == currentConversationId
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(14), dp(7), dp(12), dp(7))
                 background = rounded(if (selected) USER_BUBBLE else Color.WHITE, 14)
                 setOnClickListener {
-                    conversations.currentId = session.id
-                    showConversation()
+                    if (busy) { status.text = "请等待当前回复完成"; return@setOnClickListener }
                     hideHistory()
+                    scope.launch {
+                        conversations.select(session.id)
+                        currentConversationId = session.id
+                        showConversation()
+                    }
                 }
             }
             drawerList.addView(row, LinearLayout.LayoutParams(-1, dp(66)).apply { bottomMargin = dp(4) })
@@ -566,7 +611,7 @@ class MainActivity : Activity() {
                 ellipsize = android.text.TextUtils.TruncateAt.END
             })
             row.addView(TextView(this).apply {
-                text = conversations.lines(session.id).lastOrNull()?.text?.replace('\n', ' ')?.take(45).orEmpty()
+                text = session.preview.replace('\n', ' ').take(45)
                 textSize = 12f
                 setTextColor(MUTED)
                 maxLines = 1
@@ -578,6 +623,7 @@ class MainActivity : Activity() {
 
     private fun hideHistory() {
         drawerOverlay.visibility = View.GONE
+        historyJob?.cancel()
     }
 
     @Deprecated("Back press delegates to the navigation drawer")
@@ -586,12 +632,15 @@ class MainActivity : Activity() {
     }
 
     private fun newConversation() {
+        if (busy) { status.text = "请等待当前回复完成"; return }
         hideHistory()
-        conversations.newConversation()
-        selectedUris.clear()
-        showAttachments()
-        showConversation()
-        status.text = "新会话"
+        scope.launch {
+            currentConversationId = conversations.newConversation()
+            selectedUris.clear()
+            showAttachments()
+            showConversation()
+            status.text = "新会话"
+        }
     }
 
     private fun showSettings() {

@@ -12,7 +12,6 @@ import dev.kiora.core.AgentEvent
 import dev.kiora.core.AgentMessage
 import dev.kiora.core.AgentRuntime
 import dev.kiora.core.CapabilitySandbox
-import dev.kiora.core.JsonlSessionStore
 import dev.kiora.core.RunResult
 import dev.kiora.core.SessionTree
 import dev.kiora.core.ToolAuthorization
@@ -40,10 +39,11 @@ class CompanionAgent(
     private val onStatus: suspend (String) -> Unit,
 ) {
     private val appContext = context.applicationContext
-    private val store = JsonlSessionStore(appContext.filesDir.resolve("agent-sessions"))
+    private val db = CompanionDatabase.get(appContext)
+    private val dao = db.dao()
+    private val store = RoomSessionStore(db)
     private var connection: A2aAgentConnection? = null
     private var runtime: AgentRuntime? = null
-    private val pendingTaskIds = mutableMapOf<String, String>()
 
     val targetName: String get() = connection?.name?.ifBlank { "电脑端 Agent" } ?: "电脑端 Agent"
     val hasDesktop: Boolean get() = connection != null
@@ -92,7 +92,7 @@ class CompanionAgent(
     }
 
     suspend fun send(sessionId: String, instruction: String, selected: List<Uri>): String {
-        val pending = pendingTaskIds[sessionId]
+        val pending = dao.remoteTaskId(sessionId)
         val peer = connection?.peer
         if (selected.isNotEmpty() || pending != null || runtime == null) {
             requireNotNull(peer) { "发送附件需要先配置电脑端 Agent Card" }
@@ -115,19 +115,19 @@ class CompanionAgent(
             repeat(120) {
                 when (task.state) {
                     RemoteTaskState.COMPLETED -> {
-                        pendingTaskIds.remove(sessionId)
+                        dao.clearRemoteTask(sessionId)
                         val answer = task.output.orEmpty().ifBlank { "电脑端已完成处理" }
                         recordExchange(sessionId, recordedRequest, answer)
                         return answer
                     }
                     RemoteTaskState.INPUT_REQUIRED, RemoteTaskState.AUTH_REQUIRED -> {
-                        pendingTaskIds[sessionId] = task.id
+                        dao.putRemoteTask(RemoteTaskEntity(sessionId, task.id))
                         val answer = task.output.orEmpty().ifBlank { "电脑端需要补充信息" }
                         recordExchange(sessionId, recordedRequest, answer)
                         return answer
                     }
                     RemoteTaskState.FAILED, RemoteTaskState.CANCELED, RemoteTaskState.REJECTED -> {
-                        pendingTaskIds.remove(sessionId)
+                        dao.clearRemoteTask(sessionId)
                         error(task.output.orEmpty().ifBlank { "电脑端任务${task.state.name.lowercase()}" })
                     }
                     RemoteTaskState.SUBMITTED, RemoteTaskState.WORKING -> {
@@ -137,7 +137,7 @@ class CompanionAgent(
                     }
                 }
             }
-            pendingTaskIds[sessionId] = task.id
+            dao.putRemoteTask(RemoteTaskEntity(sessionId, task.id))
             val answer = "电脑端仍在处理，任务 ID：${task.id}。请稍后发送消息继续。"
             recordExchange(sessionId, recordedRequest, answer)
             return answer
