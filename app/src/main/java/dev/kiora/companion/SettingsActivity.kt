@@ -23,8 +23,12 @@ import android.widget.Toast
 import com.google.zxing.integration.android.IntentIntegrator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -47,19 +51,26 @@ class SettingsActivity : Activity() {
     private lateinit var apiKey: EditText
     private val draftApiKeys = mutableMapOf<String, String>()
     private lateinit var a2aList: LinearLayout
+    private val a2aStatusViews = mutableMapOf<String, TextView>()
+    private var a2aMonitorJob: Job? = null
+    private var a2aVisible = false
     private lateinit var scanValue: TextView
     private lateinit var scanDetails: TextView
     private lateinit var endpointBlock: LinearLayout
     private lateinit var customModelBlock: LinearLayout
     private lateinit var contextWindowBlock: LinearLayout
     private lateinit var contextWindowValue: EditText
+    private lateinit var contextWindowNote: TextView
     private var contextWindowKey = ""
     private lateinit var localBlock: LinearLayout
     private lateinit var localFileValue: TextView
+    private lateinit var mnnFolderValue: TextView
     private lateinit var backendValue: TextView
+    private lateinit var localNote: TextView
     private lateinit var providerNote: TextView
     private lateinit var keyNote: TextView
     private var localModelPath = ""
+    private var mnnConfigPath = ""
     private var localBackend = "cpu"
     private var approvalMode = ApprovalMode.ASSIST
     private var shellEnabled = false
@@ -89,6 +100,11 @@ class SettingsActivity : Activity() {
             }?.absolutePath.orEmpty()
         }
         localBackend = prefs.getString("local_backend", "cpu").orEmpty()
+        mnnConfigPath = prefs.getString("mnn_config_path", "").orEmpty().ifBlank {
+            File(filesDir, "mnn-models").listFiles()?.firstNotNullOfOrNull { directory ->
+                File(directory, "config.json").takeIf(File::isFile)?.absolutePath
+            }.orEmpty()
+        }
         approvalMode = ApprovalMode.fromKey(prefs.getString("approval_mode", null))
         shellEnabled = prefs.getBoolean("enable_shell", false)
         buildUi(oldEndpoint)
@@ -157,14 +173,17 @@ class SettingsActivity : Activity() {
         customModel = inputCard(customModelBlock, "自定义模型 ID", "例如服务商公布的模型名称", selectedModel, false)
         contextWindowBlock = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         content.addView(contextWindowBlock)
-        contextWindowValue = inputCard(contextWindowBlock, "上下文窗口（tokens）",
+        contextWindowValue = inputCard(contextWindowBlock, "上下文管理上限（tokens）",
             "未知时可留空", "", false).apply { inputType = InputType.TYPE_CLASS_NUMBER }
-        contextWindowBlock.addView(note("按模型实际窗口设置，Kiora 会为回复、工具结果和图片预留空间；本地模型可参考模型包说明。"))
+        contextWindowNote = note("")
+        contextWindowBlock.addView(contextWindowNote)
         localBlock = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         content.addView(localBlock)
         localFileValue = selectionRow(localBlock, "本地模型文件") { chooseLocalFile() }
+        mnnFolderValue = selectionRow(localBlock, "MNN 模型目录") { chooseMnnFolder() }
         backendValue = selectionRow(localBlock, "推理后端") { chooseBackend() }
-        localBlock.addView(note("选择 .litertlm 模型文件后会复制到应用私有存储。导入 Gemma 4 E2B 约需 2.6 GB 空间。"))
+        localNote = note("")
+        localBlock.addView(localNote)
         apiKey = inputCard(content, "模型 API Key", "粘贴你的 API Key", savedApiKey(provider.id), true)
         keyNote = note("密钥会加密保存在本机，重新打开应用后继续使用。留空并保存可清除。")
         content.addView(keyNote)
@@ -179,6 +198,7 @@ class SettingsActivity : Activity() {
         a2aList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         content.addView(a2aList)
         refreshA2aConnections()
+        content.addView(note("连接状态每 15 秒更新；检测 Agent Card 和任务端口，不会执行远端任务。"))
         content.addView(note("每个 Agent 可独立启用、编辑或删除；令牌分别加密保存在本机。"))
         content.addView(note("选中的照片和文件先作为附件信息交给模型；只有智能体调用附件工具时才会上传到电脑端。"))
 
@@ -357,23 +377,44 @@ class SettingsActivity : Activity() {
         providerValue.text = "${provider.name}  ›"
         providerNote.text = provider.note
         providerNote.visibility = if (provider.note.isBlank()) View.GONE else View.VISIBLE
-        val manual = provider.id == "custom" || selectedModel !in provider.models
+        val manual = provider.id == "custom" || (provider.id != "mnn" && selectedModel !in provider.models)
         modelValue.text = if (manual) "自定义模型  ›" else "$selectedModel  ›"
         endpointValue.text = provider.endpoint
-        modelRow.visibility = View.VISIBLE
-        endpointBlock.visibility = if (provider.id == "litert") View.GONE else View.VISIBLE
-        localBlock.visibility = if (provider.id == "litert") View.VISIBLE else View.GONE
+        modelRow.visibility = if (provider.id == "mnn") View.GONE else View.VISIBLE
+        val local = provider.id == "litert" || provider.id == "mnn"
+        endpointBlock.visibility = if (local) View.GONE else View.VISIBLE
+        localBlock.visibility = if (local) View.VISIBLE else View.GONE
+        (localFileValue.parent as View).visibility = if (provider.id == "litert") View.VISIBLE else View.GONE
+        (mnnFolderValue.parent as View).visibility = if (provider.id == "mnn") View.VISIBLE else View.GONE
+        (backendValue.parent as View).visibility = if (provider.id == "litert") View.VISIBLE else View.GONE
         localFileValue.text = if (localModelPath.isBlank()) "选择 .litertlm 文件  ›"
             else "${File(localModelPath).name}  ›"
+        mnnFolderValue.text = if (mnnConfigPath.isBlank()) "选择包含 config.json 的目录  ›"
+            else "${File(mnnConfigPath).parentFile?.name ?: "MNN 模型"}  ›"
         backendValue.text = if (localBackend == "gpu") "GPU  ›" else "CPU  ›"
-        (apiKey.parent as View).visibility = if (provider.id == "litert") View.GONE else View.VISIBLE
+        localNote.text = if (provider.id == "mnn")
+            "会复制整个模型目录到应用私有存储；图片输入需要 llm_config.json 声明视觉能力，并包含 visual.mnn 及其权重。"
+            else "选择 .litertlm 模型文件后会复制到应用私有存储。导入 Gemma 4 E2B 约需 2.6 GB 空间。"
+        (apiKey.parent as View).visibility = if (local) View.GONE else View.VISIBLE
         keyNote.visibility = (apiKey.parent as View).visibility
         endpointBlock.getChildAt(0).visibility = if (provider.id == "custom") View.GONE else View.VISIBLE
         customEndpoint.parent.let { (it as View).visibility = if (provider.id == "custom") View.VISIBLE else View.GONE }
         customModelBlock.visibility = if (manual) View.VISIBLE else View.GONE
         if (manual && selectedModel.isNotBlank()) customModel.setText(selectedModel)
         contextWindowBlock.visibility = View.VISIBLE
-        val nextContextKey = "${provider.id}:$selectedModel"
+        contextWindowValue.hint = when (provider.id) {
+            "litert" -> "请填写模型包实际窗口"
+            "mnn" -> "留空使用自动摘要"
+            else -> "未知时可留空"
+        }
+        contextWindowNote.text = if (provider.id == "mnn")
+            "可留空。Kiora 会在本机历史变长时自动生成摘要；此值仅作输入超限时的保护，不改变 MNN 模型本身的上下文能力。"
+            else if (provider.id == "litert")
+                "Kiora 会在接近窗口时自动摘要较早对话；无法摘要或单轮过长时按实际窗口限制输入。"
+            else "填写后，Kiora 会为回复、工具结果和图片预留空间，并按此值管理较早的对话。"
+        val contextModel = if (provider.id == "mnn")
+            File(mnnConfigPath).parentFile?.name.orEmpty() else selectedModel
+        val nextContextKey = "${provider.id}:$contextModel"
         if (nextContextKey != contextWindowKey) {
             contextWindowKey = nextContextKey
             val saved = prefs.getInt("context_window_$nextContextKey", 0).takeIf { it > 0 }
@@ -385,6 +426,7 @@ class SettingsActivity : Activity() {
     private fun save() {
         val endpoint = if (provider.id == "custom") customEndpoint.text.toString().trim() else provider.endpoint
         val model = when {
+            provider.id == "mnn" -> File(mnnConfigPath).parentFile?.name.orEmpty()
             provider.id == "custom" || selectedModel !in provider.models -> customModel.text.toString().trim()
             else -> selectedModel
         }
@@ -400,6 +442,10 @@ class SettingsActivity : Activity() {
             localFileValue.error = "请先导入 .litertlm 文件"
             return
         }
+        if (provider.id == "mnn" && (mnnConfigPath.isBlank() || !File(mnnConfigPath).isFile)) {
+            mnnFolderValue.error = "请先导入 MNN 模型目录"
+            return
+        }
         val contextWindow = contextWindowValue.text.toString().trim().let { raw ->
             if (raw.isBlank()) null else raw.toIntOrNull()?.takeIf { it in 512..2_000_000 }
         }
@@ -411,13 +457,14 @@ class SettingsActivity : Activity() {
             contextWindowValue.error = "请填写本地模型的上下文窗口"
             return
         }
-        if (endpoint.isBlank() && provider.id != "litert") {
+        if (endpoint.isBlank() && provider.id != "litert" && provider.id != "mnn") {
             customEndpoint.error = "请先配置模型接口地址"
             return
         }
         val config = CompanionConfig(endpoint, model,
-            if (provider.id == "litert") "" else apiKey.text.toString().trim(),
-            a2aConnections.list(), provider.id, localModelPath, localBackend, contextWindow)
+            if (provider.id == "litert" || provider.id == "mnn") "" else apiKey.text.toString().trim(),
+            a2aConnections.list(), provider.id, localModelPath, localBackend, contextWindow,
+            mnnConfigPath)
         try {
             secrets.saveApiKey(provider.id, config.apiKey)
         } catch (error: Exception) {
@@ -427,6 +474,7 @@ class SettingsActivity : Activity() {
         val saved = prefs.edit().putString("provider_id", provider.id).putString("model_url", endpoint)
             .putString("model_id", model)
             .putString("local_model_path", localModelPath).putString("local_backend", localBackend)
+            .putString("mnn_config_path", mnnConfigPath)
             .putInt("context_window_tokens", contextWindow ?: 0)
             .putInt("context_window_$contextWindowKey", contextWindow ?: 0)
             .putString("approval_mode", approvalMode.key)
@@ -448,7 +496,10 @@ class SettingsActivity : Activity() {
     }
 
     private fun refreshA2aConnections() {
+        a2aMonitorJob?.cancel()
+        a2aMonitorJob = null
         a2aList.removeAllViews()
+        a2aStatusViews.clear()
         val connections = runCatching { a2aConnections.list() }.getOrElse { error ->
             a2aList.addView(note("读取 A2A 连接失败：${error.message}"))
             return
@@ -481,14 +532,44 @@ class SettingsActivity : Activity() {
                 setTextColor(if (item.enabled) 0xFF167D73.toInt() else MUTED)
                 setPadding(dp(8), 0, 0, 0)
             })
+            val connectionStatus = TextView(this).apply {
+                text = if (item.enabled) "检测中…" else "已停用"
+                textSize = 12f
+                setTextColor(MUTED)
+                setPadding(0, dp(5), 0, 0)
+            }
+            card.addView(connectionStatus)
+            a2aStatusViews[item.id] = connectionStatus
             card.addView(TextView(this).apply {
-                text = item.agentCardUrl
+                text = listOfNotNull(item.alias.takeIf(String::isNotBlank)?.let { "触发别名 $it" },
+                    item.agentCardUrl).joinToString(" · ")
                 textSize = 12f
                 setTextColor(MUTED)
                 maxLines = 2
                 ellipsize = android.text.TextUtils.TruncateAt.END
                 setPadding(0, dp(5), 0, 0)
             })
+        }
+        if (a2aVisible) startA2aMonitor()
+    }
+
+    private fun startA2aMonitor() {
+        a2aMonitorJob?.cancel()
+        if (!a2aVisible) return
+        a2aMonitorJob = scope.launch {
+            while (isActive) {
+                val profiles = runCatching { a2aConnections.list() }.getOrNull().orEmpty()
+                profiles.filter { it.enabled }.map { profile ->
+                    launch {
+                        val result = A2aConnectionHealth.check(profile)
+                        if (isActive) a2aStatusViews[profile.id]?.apply {
+                            text = result.label
+                            setTextColor(if (result.reachable) 0xFF167D73.toInt() else 0xFFB44B43.toInt())
+                        }
+                    }
+                }.joinAll()
+                delay(15_000)
+            }
         }
     }
 
@@ -499,17 +580,20 @@ class SettingsActivity : Activity() {
         }
         val name = inputCard(form, "连接名称", "例如 DSH 落库 Agent",
             existing?.name.orEmpty(), false).apply { inputType = InputType.TYPE_CLASS_TEXT }
+        val alias = inputCard(form, "触发别名（可选）", "例如 dsh；聊天中说“通过 dsh”即可指定连接",
+            existing?.alias.orEmpty(), false).apply { inputType = InputType.TYPE_CLASS_TEXT }
         val address = inputCard(form, "Agent Card 地址", "http://电脑局域网IP:端口/.well-known/agent-card.json",
             existing?.agentCardUrl ?: url, false)
         val tokenInput = inputCard(form, "Bearer Token（可选）", "开启入站鉴权时填写",
             existing?.token ?: bearer, true)
-        form.addView(note("填写电脑端公布的 Agent Card 地址；只有服务开启入站鉴权时才需要令牌。"))
+        form.addView(note("填写电脑端公布的 Agent Card 地址；只有服务开启入站鉴权时才需要令牌。别名在各连接间不可重复。"))
         SettingsSheet.showForm(this, if (existing == null) "添加 A2A Agent" else "编辑 A2A Agent",
             "连接设置", form) {
             val candidate = A2aConnectionConfig(
                 existing?.id ?: A2aConnectionStore.newId(),
                 name.text.toString().trim(), address.text.toString().trim(),
                 tokenInput.text.toString().trim(), existing?.enabled ?: true,
+                alias.text.toString().trim().lowercase(),
             )
             runCatching { a2aConnections.upsert(candidate) }
                 .onSuccess { setResult(RESULT_OK, Intent()); refreshA2aConnections() }
@@ -522,15 +606,24 @@ class SettingsActivity : Activity() {
     private fun showA2aActions(item: A2aConnectionConfig) {
         SettingsSheet.showOptions(this, item.name, "A2A Agent", listOf(
             SettingsSheet.Option("编辑连接", item.agentCardUrl),
+            SettingsSheet.Option("立即检测", "检查 Agent Card 和任务端口"),
             SettingsSheet.Option(if (item.enabled) "停用连接" else "启用连接"),
             SettingsSheet.Option("删除连接", "会清除保存在本机的令牌", true),
         )) { index ->
             when (index) {
                 0 -> showA2aEditor(item)
-                1 -> runCatching { a2aConnections.setEnabled(item.id, !item.enabled) }
+                1 -> {
+                    if (!item.enabled) {
+                        Toast.makeText(this, "请先启用连接", Toast.LENGTH_SHORT).show()
+                    } else {
+                        a2aStatusViews[item.id]?.apply { text = "检测中…"; setTextColor(MUTED) }
+                        startA2aMonitor()
+                    }
+                }
+                2 -> runCatching { a2aConnections.setEnabled(item.id, !item.enabled) }
                     .onSuccess { setResult(RESULT_OK, Intent()); refreshA2aConnections() }
                     .onFailure { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }
-                2 -> SettingsSheet.showConfirmation(this, "删除 ${item.name}？",
+                3 -> SettingsSheet.showConfirmation(this, "删除 ${item.name}？",
                     "会移除这个连接及其保存在本机的令牌。", "删除", "A2A Agent") {
                     runCatching { a2aConnections.remove(item.id) }
                         .onSuccess { setResult(RESULT_OK, Intent()); refreshA2aConnections() }
@@ -579,6 +672,10 @@ class SettingsActivity : Activity() {
             type = "*/*"
             addCategory(Intent.CATEGORY_OPENABLE)
         }, PICK_MODEL)
+    }
+
+    private fun chooseMnnFolder() {
+        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), PICK_MNN_FOLDER)
     }
 
     private fun chooseVoiceFile(modelFile: Boolean) {
@@ -637,6 +734,15 @@ class SettingsActivity : Activity() {
     override fun onResume() {
         super.onResume()
         if (::galleryValue.isInitialized) refreshStorageGrants()
+        a2aVisible = true
+        if (::a2aList.isInitialized) startA2aMonitor()
+    }
+
+    override fun onPause() {
+        a2aVisible = false
+        a2aMonitorJob?.cancel()
+        a2aMonitorJob = null
+        super.onPause()
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>,
@@ -681,6 +787,20 @@ class SettingsActivity : Activity() {
                 runCatching { storageGrants.addFolder(uri, data?.flags ?: 0) }
                     .onFailure { foldersValue.text = "授权失败：${it.message}" }
                 refreshStorageGrants()
+            }
+            return
+        }
+        if (requestCode == PICK_MNN_FOLDER) {
+            val uri = data?.data ?: return
+            mnnFolderValue.text = "正在导入 MNN 模型目录…"
+            scope.launch {
+                try {
+                    val imported = withContext(Dispatchers.IO) { MnnModelFiles(this@SettingsActivity).importTree(uri) }
+                    mnnConfigPath = imported.absolutePath
+                    refreshProvider()
+                } catch (error: Exception) {
+                    mnnFolderValue.text = "导入失败：${error.message ?: "请检查模型文件和可用空间"}"
+                }
             }
             return
         }
@@ -763,6 +883,7 @@ class SettingsActivity : Activity() {
         const val PICK_VOICE_MODEL = 2304
         const val PICK_VOICE_TOKENS = 2305
         const val REQUEST_CAMERA_QR = 2306
+        const val PICK_MNN_FOLDER = 2307
         const val BG = 0xFFFAFAF8.toInt()
         const val PALE = 0xFFF1F3F0.toInt()
         const val INK = 0xFF20201F.toInt()

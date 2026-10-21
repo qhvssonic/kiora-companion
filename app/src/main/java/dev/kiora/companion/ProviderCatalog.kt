@@ -23,8 +23,8 @@ object ProviderCatalog {
         ),
         ProviderPreset("litert", "LiteRT-LM · 本机", "", listOf("Gemma 4 E2B"),
             "在应用中导入 .litertlm 文件，模型直接在手机运行"),
-        ProviderPreset("mnn", "MNN Chat · 本机", "http://127.0.0.1:8080/v1/chat/completions",
-            emptyList(), "先在 MNN Chat 中加载模型并开启 API 服务；模型 ID 需与 MNN Chat 一致"),
+        ProviderPreset("mnn", "MNN · 本机", "", emptyList(),
+            "导入完整的 MNN 模型目录，直接在手机运行；带视觉文件的模型可处理图片"),
         ProviderPreset("custom", "其他兼容服务", "", emptyList(), "自行填写接口地址与模型 ID"),
     )
 

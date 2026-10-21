@@ -7,10 +7,12 @@ internal data class CompanionToolSelection(
     val hasGallery: Boolean,
     val remoteTools: Set<String>,
     val imageOnlyQuestion: Boolean = false,
+    val remoteAgentRequested: Boolean = false,
+    val phoneShellRequested: Boolean = false,
 ) {
     fun select(available: Set<String>): Set<String> = if (imageOnlyQuestion) emptySet() else buildSet {
         addAll(setOf("read", "write", "edit", "get_local_time"))
-        if (shellEnabled) add("shell")
+        if (shellEnabled && (!remoteAgentRequested || phoneShellRequested)) add("shell")
         if (hasFolders || hasGallery) add(PhoneResourceTools.BROWSE)
         if (hasFolders) add(PhoneResourceTools.MANAGE)
         addAll(remoteTools)

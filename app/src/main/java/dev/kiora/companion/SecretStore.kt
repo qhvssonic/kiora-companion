@@ -18,14 +18,15 @@ internal class SecretStore(
 ) {
     private val prefs = context.applicationContext.getSharedPreferences(preferencesName, Context.MODE_PRIVATE)
 
-    fun apiKey(providerId: String): String = read("api_key_$providerId")
+    fun apiKey(providerId: String): String = if (providerId == "litert" || providerId == "mnn") ""
+        else read("api_key_$providerId")
 
     fun bearerToken(): String = read("a2a_token")
 
     fun a2aToken(connectionId: String): String = read("a2a_token_$connectionId")
 
     fun saveApiKey(providerId: String, apiKey: String) {
-        if (providerId == "litert") return
+        if (providerId == "litert" || providerId == "mnn") return
         val editor = prefs.edit()
         if (apiKey.isBlank()) editor.remove("api_key_$providerId")
         else editor.putString("api_key_$providerId", encrypt(apiKey))
@@ -41,11 +42,11 @@ internal class SecretStore(
     }
 
     fun save(providerId: String, apiKey: String, bearerToken: String) {
-        val encryptedKey = if (providerId == "litert") null
+        val encryptedKey = if (providerId == "litert" || providerId == "mnn") null
             else apiKey.takeIf(String::isNotBlank)?.let(::encrypt)
         val encryptedToken = bearerToken.takeIf(String::isNotBlank)?.let(::encrypt)
         val editor = prefs.edit()
-        if (providerId != "litert") {
+        if (providerId != "litert" && providerId != "mnn") {
             if (encryptedKey == null) editor.remove("api_key_$providerId")
             else editor.putString("api_key_$providerId", encryptedKey)
         }

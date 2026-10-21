@@ -17,6 +17,7 @@ data class A2aConnectionConfig(
     val agentCardUrl: String,
     val token: String = "",
     val enabled: Boolean = true,
+    val alias: String = "",
 )
 
 /** Connection metadata in preferences; each Bearer token stays encrypted in SecretStore. */
@@ -39,6 +40,8 @@ internal class A2aConnectionStore(
                 agentCardUrl = item.getValue("agentCardUrl").jsonPrimitive.content,
                 token = secrets.a2aToken(id),
                 enabled = item["enabled"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: true,
+                alias = item["alias"]?.jsonPrimitive?.content
+                    ?: RemoteTaskRouting.suggestAlias(item.getValue("name").jsonPrimitive.content),
             )
         }
     }
@@ -49,6 +52,9 @@ internal class A2aConnectionStore(
         require(current.none { it.id != value.id && it.agentCardUrl == value.agentCardUrl }) {
             "这个 Agent Card 地址已添加"
         }
+        require(value.alias.isBlank() || current.none {
+            it.id != value.id && it.alias.equals(value.alias, ignoreCase = true)
+        }) { "触发别名已被其他 A2A 连接使用" }
         val next = if (current.any { it.id == value.id }) current.map {
             if (it.id == value.id) value else it
         } else current + value
@@ -81,6 +87,7 @@ internal class A2aConnectionStore(
                 "name" to JsonPrimitive(item.name),
                 "agentCardUrl" to JsonPrimitive(item.agentCardUrl),
                 "enabled" to JsonPrimitive(item.enabled),
+                "alias" to JsonPrimitive(item.alias),
             ))
         }).toString()
         check(prefs.edit().putString(KEY, raw).commit()) { "无法保存 A2A 连接" }
@@ -89,6 +96,9 @@ internal class A2aConnectionStore(
     private fun validate(value: A2aConnectionConfig) {
         require(value.id.matches(Regex("[A-Za-z0-9_-]{1,64}"))) { "无效的连接 ID" }
         require(value.name.isNotBlank() && value.name.length <= 80) { "请填写 1–80 字的连接名称" }
+        require(value.alias.isEmpty() || value.alias.matches(Regex("[A-Za-z][A-Za-z0-9_-]{1,31}"))) {
+            "触发别名须为 2–32 位英文字母、数字、下划线或连字符，并以字母开头"
+        }
         require(value.token.length <= 4_096 && value.token.none { it == '\r' || it == '\n' }) {
             "Bearer Token 格式无效"
         }

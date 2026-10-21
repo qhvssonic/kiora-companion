@@ -44,10 +44,15 @@ class RoomStorageTest {
         }
         val db = Room.databaseBuilder(context, CompanionDatabase::class.java, name)
             .addMigrations(CompanionDatabase.MIGRATION_1_2, CompanionDatabase.MIGRATION_2_3,
-                CompanionDatabase.MIGRATION_3_4).build()
+                CompanionDatabase.MIGRATION_3_4, CompanionDatabase.MIGRATION_4_5,
+                CompanionDatabase.MIGRATION_5_6).build()
         try {
             assertEquals("task-legacy", db.dao().remoteTaskId("old"))
             assertEquals("old", RoomSessionStore(db).load("old")?.id)
+            assertNull(db.dao().remoteContextId("old", "dsh"))
+            db.dao().insertConversation(ConversationEntity("old", "old", 1L, 1L))
+            db.dao().putRemoteContext(RemoteContextEntity("old", "dsh", "context-1"))
+            assertEquals("context-1", db.dao().remoteContextId("old", "dsh"))
         } finally {
             db.close()
             context.deleteDatabase(name)

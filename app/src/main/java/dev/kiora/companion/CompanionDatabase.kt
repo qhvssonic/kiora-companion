@@ -89,6 +89,15 @@ data class AgentModelInvocationEntity(
     val providerId: String?,
 )
 
+@Entity(tableName = "agent_summaries", indices = [Index(value = ["sessionId"])])
+data class AgentSummaryEntity(
+    @PrimaryKey val id: String,
+    val sessionId: String,
+    val throughEntryId: String,
+    val timestamp: Long,
+    val text: String,
+)
+
 @Entity(tableName = "agent_queued_inputs", indices = [Index(value = ["sessionId"])])
 data class AgentQueuedInputEntity(
     @PrimaryKey val id: String,
@@ -105,6 +114,19 @@ data class AppStateEntity(@PrimaryKey val key: String, val value: String)
 
 @Entity(tableName = "remote_tasks")
 data class RemoteTaskEntity(@PrimaryKey val sessionId: String, val taskId: String)
+
+@Entity(
+    tableName = "remote_contexts",
+    primaryKeys = ["sessionId", "connectionId"],
+    foreignKeys = [ForeignKey(
+        entity = ConversationEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["sessionId"],
+        onDelete = ForeignKey.CASCADE,
+    )],
+)
+data class RemoteContextEntity(val sessionId: String, val connectionId: String,
+                               val contextId: String)
 
 data class ConversationSummary(val id: String, val title: String, val preview: String)
 
@@ -178,6 +200,12 @@ interface CompanionDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAgentModelInvocation(value: AgentModelInvocationEntity): Long
 
+    @Query("SELECT * FROM agent_summaries WHERE sessionId = :sessionId ORDER BY rowid")
+    suspend fun agentSummaries(sessionId: String): List<AgentSummaryEntity>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAgentSummary(value: AgentSummaryEntity): Long
+
     @Query("SELECT * FROM agent_queued_inputs WHERE sessionId = :sessionId ORDER BY rowid")
     suspend fun agentQueuedInputs(sessionId: String): List<AgentQueuedInputEntity>
 
@@ -195,14 +223,21 @@ interface CompanionDao {
 
     @Query("DELETE FROM remote_tasks WHERE sessionId = :sessionId")
     suspend fun clearRemoteTask(sessionId: String)
+
+    @Query("SELECT contextId FROM remote_contexts WHERE sessionId = :sessionId AND connectionId = :connectionId")
+    suspend fun remoteContextId(sessionId: String, connectionId: String): String?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun putRemoteContext(value: RemoteContextEntity)
 }
 
 @Database(
     entities = [ConversationEntity::class, ConversationMessageEntity::class,
         AgentSessionEntity::class, AgentEntryEntity::class, AppStateEntity::class,
-        RemoteTaskEntity::class, AgentUsageEntity::class, AgentModelInvocationEntity::class,
-        AgentQueuedInputEntity::class],
-    version = 4,
+        RemoteTaskEntity::class, RemoteContextEntity::class,
+        AgentUsageEntity::class, AgentModelInvocationEntity::class,
+        AgentQueuedInputEntity::class, AgentSummaryEntity::class],
+    version = 6,
     exportSchema = true,
 )
 abstract class CompanionDatabase : RoomDatabase() {
@@ -242,9 +277,28 @@ abstract class CompanionDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_4_5: Migration = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""CREATE TABLE IF NOT EXISTS `agent_summaries` (
+                    `id` TEXT NOT NULL, `sessionId` TEXT NOT NULL, `throughEntryId` TEXT NOT NULL,
+                    `timestamp` INTEGER NOT NULL, `text` TEXT NOT NULL, PRIMARY KEY(`id`))""")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_summaries_sessionId` ON `agent_summaries` (`sessionId`)")
+            }
+        }
+
+        val MIGRATION_5_6: Migration = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""CREATE TABLE IF NOT EXISTS `remote_contexts` (
+                    `sessionId` TEXT NOT NULL, `connectionId` TEXT NOT NULL,
+                    `contextId` TEXT NOT NULL, PRIMARY KEY(`sessionId`, `connectionId`),
+                    FOREIGN KEY(`sessionId`) REFERENCES `conversations`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)""")
+            }
+        }
+
         fun get(context: Context): CompanionDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, CompanionDatabase::class.java,
-                "kiora-companion.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                "kiora-companion.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
+                    MIGRATION_4_5, MIGRATION_5_6)
                 .build().also { instance = it }
         }
     }

@@ -146,7 +146,10 @@ class MainActivity : Activity() {
                 currentConversationId = conversations.currentId()
                 showConversation()
                 if (settings.getString("provider_id", "") == "litert" ||
-                    (settings.getString("model_url", "").orEmpty().isNotBlank() &&
+                    (settings.getString("provider_id", "") == "mnn" &&
+                        settings.getString("mnn_config_path", "").orEmpty().isNotBlank()) ||
+                    (settings.getString("provider_id", "") !in listOf("litert", "mnn") &&
+                        settings.getString("model_url", "").orEmpty().isNotBlank() &&
                         settings.getString("model_id", "").orEmpty().isNotBlank())) {
                     startConnection(savedConfig())
                 } else status.text = "请先配置模型"
@@ -162,6 +165,7 @@ class MainActivity : Activity() {
             voiceRecorder.cancel()
         }
         scope.cancel()
+        CoroutineScope(Dispatchers.IO).launch { runCatching { agent.close() } }
         super.onDestroy()
     }
 
@@ -1103,6 +1107,7 @@ class MainActivity : Activity() {
         answerShownInRun = false
         status.text = if (queueId == null) "正在发送…" else "正在处理引导指令…"
         sendJob = scope.launch {
+            var completedForQueue = false
             try {
                 if (queueId == null) {
                     val previews = withContext(Dispatchers.IO) {
@@ -1133,6 +1138,7 @@ class MainActivity : Activity() {
                     null -> "已完成"
                 }
                 status.text = listOfNotNull(state, reply.modelDetail).joinToString(" · ")
+                completedForQueue = reply.attention == null
             } catch (cancelled: CancellationException) {
                 streamRow?.let(transcript::removeView)
                 clearStream()
@@ -1160,6 +1166,10 @@ class MainActivity : Activity() {
                     val pending = runCatching { agent.pendingQueuedInputCount(id) }.getOrDefault(0)
                     if (pending > 0) status.text = "${status.text} · $pending 条指令待下次处理"
                     refreshQueue()
+                    if (completedForQueue && pending > 0 && currentConversationId == id) {
+                        val next = agent.pendingQueuedInputs(id).firstOrNull()
+                        if (next != null) performSend("", next.id)
+                    }
                 }
             }
         }
@@ -1326,6 +1336,20 @@ class MainActivity : Activity() {
                 status.text = "已移除删除的扫描草稿附件"
             }
         }
+        if (requestCode == SETTINGS) {
+            val config = try { savedConfig() } catch (error: Exception) {
+                status.text = "无法读取已保存的密钥：${error.message ?: "请在设置中重新输入"}"
+                return
+            }
+            if (resultCode == RESULT_OK) allowedToolsByConversation.clear()
+            updateModelIndicator()
+            if (config != activeConfig || agent.hasUnavailableA2aConnections(config)) {
+                startConnection(config)
+            } else if (resultCode == RESULT_OK) {
+                status.text = "设置已保存"
+            }
+            return
+        }
         if (resultCode != RESULT_OK || data == null) return
         if (requestCode == DOCUMENT_SCAN) {
             val id = data.getStringExtra(DocumentScanActivity.EXTRA_DRAFT_ID) ?: return
@@ -1340,20 +1364,6 @@ class MainActivity : Activity() {
             composer.setText("请根据以下扫描原文整理文档，保留可核对的事实。\n\n扫描原文：\n$text\n\n整理要求：")
             composer.setSelection(composer.length())
             status.text = "扫描原文已填入，请用语音或文字补充整理要求"
-            return
-        }
-        if (requestCode == SETTINGS) {
-            allowedToolsByConversation.clear()
-            val config = try { savedConfig() } catch (error: Exception) {
-                status.text = "无法读取已保存的密钥：${error.message ?: "请在设置中重新输入"}"
-                return
-            }
-            updateModelIndicator()
-            if (config == activeConfig) {
-                status.text = "设置已保存"
-                return
-            }
-            startConnection(config)
             return
         }
         if (requestCode != PICK_PHOTOS) return
@@ -1651,6 +1661,7 @@ class MainActivity : Activity() {
             settings.getString("local_backend", "cpu").orEmpty(),
             settings.getInt("context_window_tokens", 0).takeIf { it > 0 }
                 ?: ModelContextDefaults.window(providerId, modelId),
+            settings.getString("mnn_config_path", "").orEmpty(),
         )
     }
 

@@ -8,6 +8,8 @@ import dev.kiora.core.SessionModelInvocation
 import dev.kiora.core.SessionModelInvocationStore
 import dev.kiora.core.SessionStore
 import dev.kiora.core.SessionInputQueueStore
+import dev.kiora.core.SessionSummary
+import dev.kiora.core.SessionSummaryStore
 import dev.kiora.core.QueuedUserInput
 import dev.kiora.core.QueuedInputKind
 import dev.kiora.core.AgentMessage
@@ -17,7 +19,7 @@ import dev.kiora.core.SessionUsageStore
 
 /** Android Room adapter for Kiora's platform-neutral SessionStore interface. */
 class RoomSessionStore(private val db: CompanionDatabase) : SessionStore, SessionUsageStore,
-    SessionModelInvocationStore, SessionInputQueueStore {
+    SessionModelInvocationStore, SessionInputQueueStore, SessionSummaryStore {
     private val dao = db.dao()
 
     override suspend fun load(sessionId: String): SessionTree? = db.withTransaction {
@@ -33,8 +35,11 @@ class RoomSessionStore(private val db: CompanionDatabase) : SessionStore, Sessio
             SessionModelInvocation(row.id, row.assistantEntryId, row.timestamp,
                 ModelIdentity(row.modelId, row.providerId))
         }
+        val summaries = dao.agentSummaries(sessionId).map { row ->
+            SessionSummary(row.id, row.throughEntryId, row.timestamp, row.text)
+        }
         val queue = dao.agentQueuedInputs(sessionId)
-        SessionTree.restore(sessionId, entries, session.leafId, emptyList(), usages, invocations,
+        SessionTree.restore(sessionId, entries, session.leafId, summaries, usages, invocations,
             queue.map { QueuedUserInput(it.id, QueuedInputKind.valueOf(it.kind), it.text,
                 it.targetLeafId, it.timestamp) }, queue.filter { it.consumed }.map { it.id }.toSet())
     }
@@ -81,6 +86,15 @@ class RoomSessionStore(private val db: CompanionDatabase) : SessionStore, Sessio
                 invocation.id, sessionId, invocation.assistantEntryId, invocation.timestampEpochMillis,
                 invocation.model.modelId, invocation.model.providerId,
             )) != -1L) { "Duplicate model invocation ID" }
+        }
+
+    override suspend fun appendSummary(sessionId: String, summary: SessionSummary) =
+        db.withTransaction {
+            require(dao.hasAgentEntry(sessionId, summary.throughEntryId) > 0) { "Unknown summary boundary" }
+            require(dao.insertAgentSummary(AgentSummaryEntity(summary.id, sessionId,
+                summary.throughEntryId, summary.timestampEpochMillis, summary.text)) != -1L) {
+                "Duplicate session summary ID"
+            }
         }
 
     override suspend fun enqueueInput(sessionId: String, input: QueuedUserInput) = db.withTransaction {

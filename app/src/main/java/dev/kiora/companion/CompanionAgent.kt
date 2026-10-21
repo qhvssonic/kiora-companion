@@ -17,11 +17,13 @@ import dev.kiora.android.storage.AndroidStorageTools
 import dev.kiora.core.AgentEvent
 import dev.kiora.core.AgentMessage
 import dev.kiora.core.AgentRuntime
+import dev.kiora.core.AutoCompaction
 import dev.kiora.core.ActiveToolSelector
 import dev.kiora.core.ModelPort
 import dev.kiora.core.ModelContextTransformer
 import dev.kiora.core.RunLimits
 import dev.kiora.core.RunResult
+import dev.kiora.core.SessionSummarizer
 import dev.kiora.core.QueuedUserInput
 import dev.kiora.core.ToolAuthorization
 import dev.kiora.core.ToolAuthorizationRequest
@@ -33,7 +35,7 @@ import dev.kiora.model.CompatibleModelProviders
 import dev.kiora.model.CompatibleProvider
 import dev.kiora.model.litert.LiteRtBackend
 import dev.kiora.model.litert.LiteRtModelPort
-import dev.kiora.model.mnn.MnnChatModelPort
+import dev.kiora.model.mnn.MnnModelPort
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -49,7 +51,11 @@ import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.util.Base64
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
 
 data class CompanionConfig(
     val modelUrl: String,
@@ -60,6 +66,7 @@ data class CompanionConfig(
     val localModelPath: String = "",
     val localBackend: String = "cpu",
     val contextWindowTokens: Int? = null,
+    val mnnConfigPath: String = "",
 )
 
 data class CompanionReply(
@@ -87,10 +94,15 @@ class CompanionAgent(
     }
     private val settings = appContext.getSharedPreferences("companion_settings", Context.MODE_PRIVATE)
     private var connections: Map<String, A2aAgentConnection> = emptyMap()
+    private var configuredConnections: List<A2aConnectionConfig> = emptyList()
     private var remoteSkillsByToolName: Map<String, RemoteSkill> = emptyMap()
     private var runtime: AgentRuntime? = null
     private var localModel: LiteRtModelPort? = null
+    private var mnnModel: MnnModelPort? = null
     @Volatile private var imageOnlyQuestion = false
+    @Volatile private var remoteAgentRequested = false
+    @Volatile private var phoneShellRequested = false
+    @Volatile private var remoteTurn: RemoteTurn? = null
     private val sendLock = Mutex()
     private var activeAttachments: AttachmentTurn? = null
 
@@ -101,16 +113,24 @@ class CompanionAgent(
     )
 
     private data class RemoteSkill(val profile: A2aConnectionConfig, val tool: A2aSkillTool)
+    private data class RemoteTurn(val connectionId: String?, val alias: String?,
+                                  val selectedCount: Int)
     private data class PendingRemoteTask(val connectionId: String, val taskId: String)
 
     val targetName: String get() = connections.values.singleOrNull()?.name ?: "A2A Agent"
     val hasDesktop: Boolean get() = connections.isNotEmpty()
     val hasModel: Boolean get() = runtime != null
+    fun hasUnavailableA2aConnections(config: CompanionConfig): Boolean =
+        config.a2aConnections.any { it.enabled && it.id !in connections }
 
-    suspend fun configure(config: CompanionConfig): String {
+    suspend fun configure(config: CompanionConfig): String = sendLock.withLock {
         val usesLiteRt = config.providerId == "litert"
-        require((usesLiteRt && config.localModelPath.isNotBlank()) ||
-            (config.modelUrl.isNotBlank() && config.modelId.isNotBlank())) {
+        val usesMnn = config.providerId == "mnn"
+        require(when {
+            usesLiteRt -> config.localModelPath.isNotBlank()
+            usesMnn -> config.mnnConfigPath.isNotBlank()
+            else -> config.modelUrl.isNotBlank() && config.modelId.isNotBlank()
+        }) {
             "请先配置模型；电脑端 A2A 只提供工具"
         }
         val discovered = linkedMapOf<String, A2aAgentConnection>()
@@ -137,6 +157,11 @@ class CompanionAgent(
                 failedConnections++
             }
         }
+        runtime = null
+        localModel?.close()
+        mnnModel?.close()
+        localModel = null
+        mnnModel = null
         val model: ModelPort? = when {
             usesLiteRt -> LiteRtModelPort(
                 modelFile = File(config.localModelPath),
@@ -147,11 +172,10 @@ class CompanionAgent(
                 onStatus("正在加载本地模型…")
                 it.prepare()
             }
-            config.providerId == "mnn" -> MnnChatModelPort(
-                model = config.modelId,
-                endpoint = config.modelUrl,
-                apiToken = { config.apiKey.ifBlank { null } },
-            )
+            usesMnn -> MnnModelPort(File(config.mnnConfigPath)).also {
+                onStatus("正在加载 MNN 本地模型…")
+                it.prepare()
+            }
             config.modelUrl.isNotBlank() && config.modelId.isNotBlank() -> {
                 val providerId = config.providerId.ifBlank { ProviderCatalog.infer(config.modelUrl).id }
                 CompatibleModelProviders(listOf(CompatibleProvider(
@@ -169,6 +193,8 @@ class CompanionAgent(
             discovered[profile.id]?.skillTools(
                 fileLoader = ::loadSkillFiles,
                 fileIdValidator = ::validateSkillFileIds,
+                argumentValidator = { arguments -> validateRemoteSkillArguments(profile.id, arguments) },
+                requireFileSource = true,
                 resultSender = { message, taskId -> submitRemoteMessage(profile.id, message, taskId) },
                 toolNamePrefix = "a2a_${profile.id.take(12)}",
             )?.map { RemoteSkill(profile, it) }.orEmpty()
@@ -191,6 +217,29 @@ class CompanionAgent(
         ).all()
         val tools = phoneTools.take(1) + workspaceTools.filterNot { it.definition.name == "read" } +
             phoneTools.drop(1) + DeviceTimeTool() + remoteTools
+        val autoCompaction = if (usesLiteRt || usesMnn) {
+            val trigger = minOf(config.contextWindowTokens?.let { it * 3 / 4 } ?: 16_384,
+                16_384).coerceAtLeast(512)
+            AutoCompaction(trigger, SessionSummarizer { earlier ->
+                onStatus("正在整理较早的对话…")
+                val history = earlier.map { message ->
+                    when (message) {
+                        is AgentMessage.User -> if (message.images.isEmpty()) message else
+                            message.copy(text = message.text + "\n[原消息包含图片，摘要时未重复载入]",
+                                images = emptyList())
+                        is AgentMessage.ToolResult -> if (message.images.isEmpty()) message else
+                            message.copy(text = message.text + "\n[原工具结果包含图片，摘要时未重复载入]",
+                                images = emptyList())
+                        else -> message
+                    }
+                }
+                val answer = model.respond(history + AgentMessage.User(
+                    "请将上述较早对话压缩为简洁的中文会话摘要，供后续继续任务。" +
+                        "保留用户目标、明确约束、已完成步骤、关键路径和未解决事项；" +
+                        "只根据对话记录陈述事实，不执行任何工具，也不要添加新建议。"), emptyList())
+                answer.text.trim().take(8_000)
+            })
+        } else null
         val agent = AgentRuntime(
                 model = model,
                 tools = tools,
@@ -201,16 +250,33 @@ class CompanionAgent(
                         shellEnabled = settings.getBoolean("enable_shell", false),
                         hasFolders = storageGrants.folders().isNotEmpty(),
                         hasGallery = GalleryAccess.hasFullAccess(appContext),
-                        remoteTools = remoteTools.map { it.definition.name }.toSet(),
+                        remoteTools = remoteSkillsByToolName.filterValues { skill ->
+                            remoteTurn?.connectionId?.let { it == skill.profile.id } ?: true
+                        }.keys,
                         imageOnlyQuestion = imageOnlyQuestion,
+                        remoteAgentRequested = remoteAgentRequested,
+                        phoneShellRequested = phoneShellRequested,
                     ).select(available)
                 },
                 contextTransformer = ModelContextTransformer { messages ->
-                    messages
+                    if (!usesMnn || (model as? MnnModelPort)?.supportsVision == true) messages
+                    else messages.map { message ->
+                        when (message) {
+                            is AgentMessage.User -> if (message.images.isEmpty()) message else
+                                message.copy(text = message.text + "\n[Earlier images are unavailable to this model.]",
+                                    images = emptyList())
+                            is AgentMessage.ToolResult -> if (message.images.isEmpty()) message else
+                                message.copy(text = message.text + "\n[Image output unavailable to this model.]",
+                                    images = emptyList())
+                            else -> message
+                        }
+                    }
                 },
                 contextWindowTokens = config.contextWindowTokens,
-                reserveOutputTokens = if (usesLiteRt) 768 else 4_096,
-                limits = if (usesLiteRt) RunLimits(timeoutMillis = 300_000) else RunLimits(),
+                reserveOutputTokens = if (usesLiteRt || usesMnn) 768 else 4_096,
+                autoCompaction = autoCompaction,
+                autoRunFollowUps = false,
+                limits = if (usesLiteRt || usesMnn) RunLimits(timeoutMillis = 300_000) else RunLimits(),
                 events = { event ->
                     when (event) {
                         is AgentEvent.AssistantTextDelta -> withContext(Dispatchers.Main) { onDelta(event.delta) }
@@ -224,17 +290,26 @@ class CompanionAgent(
                     }
                 },
             )
-        localModel?.close()
         localModel = model as? LiteRtModelPort
+        mnnModel = model as? MnnModelPort
         connections = discovered
+        configuredConnections = config.a2aConnections
         remoteSkillsByToolName = remoteSkills.associateBy { it.tool.definition.name }
         runtime = agent
-        return when {
+        when {
             discovered.isNotEmpty() -> "模型就绪 · ${discovered.size} 个 A2A Agent 已连接" +
                 if (failedConnections > 0) "（${failedConnections} 个暂不可用）" else ""
             failedConnections > 0 -> "模型就绪 · A2A Agent 暂不可用"
             else -> "模型就绪"
         }
+    }
+
+    suspend fun close() = sendLock.withLock {
+        runtime = null
+        localModel?.close()
+        mnnModel?.close()
+        localModel = null
+        mnnModel = null
     }
 
     suspend fun send(sessionId: String, instruction: String, selected: List<Uri>): CompanionReply =
@@ -248,11 +323,13 @@ class CompanionAgent(
 
     private suspend fun sendInternal(sessionId: String, instruction: String, selected: List<Uri>,
                                      queueId: String?): CompanionReply {
-        val agent = requireNotNull(runtime) { "请先配置模型" }
         return sendLock.withLock {
+            val agent = requireNotNull(runtime) { "请先配置模型" }
             val pendingTask = decodePendingTask(dao.remoteTaskId(sessionId))
-            val imageUris = selected.filter(::isImageAttachment)
-            require(imageUris.size <= 8) { "一次最多选择 8 张照片" }
+            val selectedImages = selected.filter(::isImageAttachment)
+            require(selectedImages.size <= 8) { "一次最多选择 8 张照片" }
+            val mnnTextOnly = mnnModel != null && mnnModel?.supportsVision != true
+            val imageUris = if (mnnTextOnly) emptyList() else selectedImages
             require(localModel == null || imageUris.size <= 1) { "当前本机模型每次只能识别一张照片" }
             val otherUris = selected.filterNot { it in imageUris }
             val directVision = imageUris.isNotEmpty() && otherUris.isEmpty() && pendingTask == null
@@ -262,11 +339,39 @@ class CompanionAgent(
                 .containsMatchIn(instruction)
             val remoteRequested = Regex("(?i)(发送|上传|转发|分享|电脑端|远程|桌面|A2A|DSH|send|upload|remote|desktop)")
                 .containsMatchIn(instruction)
-            val pureImageQuestion = directVision && !actionRequested
-            val canSendFiles = remoteSkillsByToolName.values.any { it.tool.acceptsFiles }
+            val aliasMatches = RemoteTaskRouting.matchingConnections(instruction, configuredConnections)
+            require(aliasMatches.size <= 1) { "提到了多个 A2A 连接别名，请只指定一个" }
+            val target = aliasMatches.singleOrNull()
+            if (target != null) {
+                require(target.enabled) { "A2A 连接 ${target.name} 已停用" }
+                require(target.id in connections) { "A2A 连接 ${target.name} 暂不可用" }
+            }
+            val requestedRemote = target != null || RemoteTaskRouting.requestsRemoteAgent(instruction)
+            require(!mnnTextOnly || selectedImages.isEmpty() || requestedRemote || remoteRequested) {
+                "当前 MNN 模型包缺少视觉文件；图片问题请切换视觉模型"
+            }
+            val turn = if (requestedRemote) RemoteTurn(target?.id, target?.alias, selected.size) else null
+            val pureImageQuestion = directVision && !actionRequested && !requestedRemote
+            val canSendFiles = remoteSkillsByToolName.values.any { skill ->
+                (target == null || skill.profile.id == target.id) && skill.tool.acceptsFiles
+            }
+            require(target == null || selected.isEmpty() || canSendFiles) {
+                "A2A 连接 ${target?.name.orEmpty()} 不支持文件附件"
+            }
+            val recentWorkspaceFiles = if (requestedRemote && canSendFiles) {
+                val paths = RecentWorkspaceFiles.recentWrittenPaths(
+                    store.load(sessionId)?.activeMessages().orEmpty())
+                withContext(Dispatchers.IO) {
+                    paths.filter { path -> runCatching { WorkspaceA2aFiles.file(
+                        File(appContext.filesDir, "agent-workspace"), path) }.isSuccess }
+                }
+            } else emptyList()
             val selectedLabels = selected.mapIndexed { index, uri -> "selected:$index (${attachmentName(uri)})" }
             activeAttachments = AttachmentTurn(sessionId, selected.toList())
             imageOnlyQuestion = pureImageQuestion
+            remoteAgentRequested = requestedRemote
+            phoneShellRequested = RemoteTaskRouting.requestsPhoneShell(instruction)
+            remoteTurn = turn
             try {
                 val userText = if (directVision) {
                     buildString {
@@ -277,7 +382,7 @@ class CompanionAgent(
                             append("\n\n[The selected image is already attached as visual input to this message. " +
                                 "Analyze its pixels directly. Do not call read with the photo's display name, " +
                                 "URI, or an empty path to inspect this attached image.]")
-                        if (canSendFiles && remoteRequested) append("\n\n[Selected images are attached directly to this model request. " +
+                        if (canSendFiles && (requestedRemote || remoteRequested)) append("\n\n[Selected images are attached directly to this model request. " +
                             "A desktop Agent Card skill may receive these file IDs only when the user " +
                             "asks that desktop skill to process the images: ${selectedLabels.joinToString()}. " +
                             "For other requested actions, including saving results in the local workspace, " +
@@ -300,21 +405,33 @@ class CompanionAgent(
                         if (canSendFiles) append("A file-capable Agent Card skill may receive selected file IDs " +
                             "only when the user's request requires that skill to process them. ")
                         append("Do not claim to have read contents without a tool result.]")
+                        if (mnnTextOnly && selectedImages.isNotEmpty())
+                            append("\n\n[This MNN model cannot see image pixels. It may send selected images " +
+                                "to a file-capable desktop skill only when requested.]")
                     } else if (pendingTask != null) {
                         append("\n\n[A previous desktop task (${pendingTask.taskId}) is awaiting follow-up. " +
                             "If the user is answering it, call the matching Agent Card skill with taskId. " +
                             "No new files are selected in this turn.]")
                     }
                 }
-                val modelText = if (canSendFiles && selected.isEmpty() && !pureImageQuestion) userText +
-                    "\n\n[When the user asks to send a file created in the local workspace to an A2A Agent, " +
-                    "pass workspace:<relative-path> in that Agent Card skill's files argument. " +
-                    "A filename written only in instruction does not upload the file. " +
-                    "The host checks the path and asks for upload approval. Do not send a file unless requested.]"
-                    else userText
+                var modelText = userText
+                if (turn != null) {
+                    modelText += "\n\n[Remote A2A context: " +
+                        (if (target != null) "The user named connection '${target.name}' (alias ${target.alias}); use its skill. "
+                            else "Choose the appropriate available A2A skill. ") +
+                        "Decide from the conversation whether a referenced file is on this phone, " +
+                        "already at the remote agent, or not involved. Set fileSource accordingly " +
+                        "for file-capable skills. A local file is uploaded only through files; " +
+                        "instruction describes the remote task. If the intended file cannot be " +
+                        "identified, ask the user instead of inventing a file or claiming delivery. " +
+                        "Verified files written in this chat, newest first: " +
+                        (if (recentWorkspaceFiles.isEmpty()) "none"
+                            else recentWorkspaceFiles.joinToString { JsonPrimitive("workspace:$it").toString() }) +
+                        ". These are candidates, not attachments.]"
+                }
                 val images = imageUris.map { readModelImage(it) }
                 val result = if (queueId == null) agent.run(sessionId, modelText, images)
-                    else agent.runQueued(sessionId, queueId)
+                    else agent.runQueued(sessionId, queueId, modelText)
                 val detail = latestModelDetail(sessionId)
                 when (result) {
                     is RunResult.Completed -> CompanionReply(result.text, modelDetail = detail)
@@ -325,6 +442,9 @@ class CompanionAgent(
                 }
             } finally {
                 imageOnlyQuestion = false
+                remoteAgentRequested = false
+                phoneShellRequested = false
+                remoteTurn = null
                 activeAttachments = null
             }
         }
@@ -452,6 +572,19 @@ class CompanionAgent(
         }
     }
 
+    private fun validateRemoteSkillArguments(connectionId: String, arguments: JsonObject): String? {
+        val turn = remoteTurn ?: return null
+        if (turn.connectionId != null && turn.connectionId != connectionId)
+            return "本轮已指定其他 A2A 连接"
+        val ids = arguments["files"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty()
+        if (turn.selectedCount > 0 && ids.isEmpty())
+            return "请从本轮已选文件中选择 ID 放入 files 数组；只写文件名不会上传。"
+        val task = arguments["instruction"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        if (turn.alias?.let { RemoteTaskRouting.containsRoutePhrase(task, it) } == true)
+            return "instruction 请只描述电脑端要做的事，不必重复本机连接别名"
+        return null
+    }
+
     private suspend fun validateSkillFileIds(ids: List<String>): String? {
         val turn = requireNotNull(activeAttachments) { "没有正在处理的会话" }
         return try {
@@ -555,8 +688,12 @@ class CompanionAgent(
             require(!turn.used) { "本轮已发送文件，请勿重复发送" }
             turn.used = true
         }
+        val contextId = dao.remoteContextId(sessionId, connectionId)
+            ?: if (pending == null) recoverRemoteContext(sessionId, connectionId, peer) else null
+        val outgoing = message.copy(contextId = if (pending == null) contextId else null)
         onStatus(if (message.files.isEmpty()) "正在联系电脑端…" else "正在发送 ${message.files.size} 个附件…")
-        var task = if (pending == null) peer.send(message) else peer.continueTask(pending.taskId, message)
+        var task = if (pending == null) peer.send(outgoing) else peer.continueTask(pending.taskId, outgoing)
+        rememberRemoteContext(sessionId, connectionId, if (pending == null) contextId else null, task)
         repeat(120) {
             when (task.state) {
                 RemoteTaskState.COMPLETED -> {
@@ -579,11 +716,43 @@ class CompanionAgent(
                     onStatus("电脑端正在处理…")
                     delay(500)
                     task = peer.getTask(task.id)
+                    rememberRemoteContext(sessionId, connectionId, if (pending == null) contextId else null, task)
                 }
             }
         }
         dao.putRemoteTask(RemoteTaskEntity(sessionId, "a2a2:$connectionId:${task.id}"))
         return remoteToolOutput(task, "电脑端仍在处理，任务 ID：${task.id}。请稍后发送消息继续。")
+    }
+
+    private suspend fun rememberRemoteContext(sessionId: String, connectionId: String,
+                                              expected: String?, task: RemoteTask) {
+        val received = task.contextId?.takeIf(String::isNotBlank) ?: return
+        require(expected == null || expected == received) {
+            "A2A 连接返回了不同的会话上下文，已停止继续发送以避免丢失之前的工作"
+        }
+        val saved = dao.remoteContextId(sessionId, connectionId)
+        require(saved == null || saved == received) {
+            "A2A 连接的会话上下文发生变化，已停止继续发送"
+        }
+        if (saved == null) dao.putRemoteContext(RemoteContextEntity(sessionId, connectionId, received))
+    }
+
+    private suspend fun recoverRemoteContext(sessionId: String, connectionId: String,
+                                             peer: dev.kiora.a2a.A2aPeer): String? {
+        val history = store.load(sessionId)?.activeMessages().orEmpty()
+        val lookup: (String) -> String? = { name -> remoteSkillsByToolName[name]?.profile?.id }
+        val priorTasks = RemoteContextRecovery.tasks(history, connectionId, lookup)
+        if (priorTasks.isEmpty()) return null
+        for (prior in priorTasks) {
+            val contextId = prior.contextId ?: try { peer.getTask(prior.taskId).contextId }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { continue }
+            if (contextId.isNullOrBlank()) continue
+            dao.putRemoteContext(RemoteContextEntity(sessionId, connectionId, contextId))
+            onStatus("已接续先前的电脑端会话")
+            return contextId
+        }
+        error("无法恢复先前电脑端会话的上下文，请确认服务端未清除任务记录；为避免丢失上下文，本次未新建远端会话")
     }
 
     private fun remoteToolOutput(task: RemoteTask, text: String,
@@ -593,7 +762,7 @@ class CompanionAgent(
             "taskId" to JsonPrimitive(task.id),
             "state" to JsonPrimitive(task.state.name),
             "output" to JsonPrimitive(task.output.orEmpty()),
-        )),
+        ) + listOfNotNull(task.contextId?.let { "contextId" to JsonPrimitive(it) })),
         attention = attention,
     )
 
