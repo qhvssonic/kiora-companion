@@ -1,8 +1,10 @@
 package dev.kiora.companion
 
+import android.Manifest
 import android.app.Activity
 import android.content.ClipData
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Typeface
@@ -210,6 +212,9 @@ class DocumentScanActivity : Activity() {
         backgroundTintList = null
         background = rounded(if (primary) INK else Color.WHITE, 15,
             if (primary) null else BORDER)
+        stateListAnimator = null
+        elevation = 0f
+        translationZ = 0f
         setOnClickListener { action() }
     }
 
@@ -221,6 +226,10 @@ class DocumentScanActivity : Activity() {
 
     private fun takePhoto() {
         if (recognizing) return
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.CAMERA), CAMERA_PERMISSION)
+            return
+        }
         saveCurrent()
         val draft = store.newCameraDraft()
         try {
@@ -235,6 +244,15 @@ class DocumentScanActivity : Activity() {
             pendingCameraId = null
             store.discardEmptyCameraDraft(draft.id)
             status.text = "无法打开相机：${error.message ?: "请检查相机应用"}"
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>,
+        grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == CAMERA_PERMISSION) {
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) takePhoto()
+            else status.text = "未获得相机权限，无法拍照扫描"
         }
     }
 
@@ -456,6 +474,7 @@ class DocumentScanActivity : Activity() {
         const val EXTRA_TEXT = "document_text"
         private const val CAPTURE = 1
         private const val PICK = 2
+        private const val CAMERA_PERMISSION = 3
         private const val MAX_SOURCE_BYTES = 20L * 1024 * 1024
     }
 }

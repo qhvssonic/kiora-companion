@@ -89,6 +89,17 @@ data class AgentModelInvocationEntity(
     val providerId: String?,
 )
 
+@Entity(tableName = "agent_queued_inputs", indices = [Index(value = ["sessionId"])])
+data class AgentQueuedInputEntity(
+    @PrimaryKey val id: String,
+    val sessionId: String,
+    val kind: String,
+    val text: String,
+    val targetLeafId: String?,
+    val timestamp: Long,
+    val consumed: Boolean = false,
+)
+
 @Entity(tableName = "app_state")
 data class AppStateEntity(@PrimaryKey val key: String, val value: String)
 
@@ -167,6 +178,15 @@ interface CompanionDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAgentModelInvocation(value: AgentModelInvocationEntity): Long
 
+    @Query("SELECT * FROM agent_queued_inputs WHERE sessionId = :sessionId ORDER BY rowid")
+    suspend fun agentQueuedInputs(sessionId: String): List<AgentQueuedInputEntity>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAgentQueuedInput(value: AgentQueuedInputEntity): Long
+
+    @Query("UPDATE agent_queued_inputs SET consumed = 1 WHERE id = :id AND sessionId = :sessionId AND consumed = 0")
+    suspend fun consumeAgentQueuedInput(sessionId: String, id: String): Int
+
     @Query("SELECT taskId FROM remote_tasks WHERE sessionId = :sessionId")
     suspend fun remoteTaskId(sessionId: String): String?
 
@@ -180,8 +200,9 @@ interface CompanionDao {
 @Database(
     entities = [ConversationEntity::class, ConversationMessageEntity::class,
         AgentSessionEntity::class, AgentEntryEntity::class, AppStateEntity::class,
-        RemoteTaskEntity::class, AgentUsageEntity::class, AgentModelInvocationEntity::class],
-    version = 3,
+        RemoteTaskEntity::class, AgentUsageEntity::class, AgentModelInvocationEntity::class,
+        AgentQueuedInputEntity::class],
+    version = 4,
     exportSchema = true,
 )
 abstract class CompanionDatabase : RoomDatabase() {
@@ -211,9 +232,19 @@ abstract class CompanionDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_3_4: Migration = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""CREATE TABLE IF NOT EXISTS `agent_queued_inputs` (
+                    `id` TEXT NOT NULL, `sessionId` TEXT NOT NULL, `kind` TEXT NOT NULL,
+                    `text` TEXT NOT NULL, `targetLeafId` TEXT, `timestamp` INTEGER NOT NULL,
+                    `consumed` INTEGER NOT NULL, PRIMARY KEY(`id`))""")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_queued_inputs_sessionId` ON `agent_queued_inputs` (`sessionId`)")
+            }
+        }
+
         fun get(context: Context): CompanionDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, CompanionDatabase::class.java,
-                "kiora-companion.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                "kiora-companion.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build().also { instance = it }
         }
     }

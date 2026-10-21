@@ -6,6 +6,8 @@ import androidx.test.platform.app.InstrumentationRegistry
 import dev.kiora.core.AgentMessage
 import dev.kiora.core.ModelIdentity
 import dev.kiora.core.ModelUsage
+import dev.kiora.core.QueuedInputKind
+import dev.kiora.core.QueuedUserInput
 import dev.kiora.core.SessionModelInvocation
 import dev.kiora.core.SessionTree
 import dev.kiora.core.SessionUsage
@@ -41,13 +43,43 @@ class RoomStorageTest {
             legacy.close()
         }
         val db = Room.databaseBuilder(context, CompanionDatabase::class.java, name)
-            .addMigrations(CompanionDatabase.MIGRATION_1_2, CompanionDatabase.MIGRATION_2_3).build()
+            .addMigrations(CompanionDatabase.MIGRATION_1_2, CompanionDatabase.MIGRATION_2_3,
+                CompanionDatabase.MIGRATION_3_4).build()
         try {
             assertEquals("task-legacy", db.dao().remoteTaskId("old"))
             assertEquals("old", RoomSessionStore(db).load("old")?.id)
         } finally {
             db.close()
             context.deleteDatabase(name)
+        }
+    }
+
+    @Test fun queuedInputIsPersistedAndConsumedWithItsMessage() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val db = Room.inMemoryDatabaseBuilder(context, CompanionDatabase::class.java).build()
+        try {
+            val store = RoomSessionStore(db)
+            store.create("queued")
+            val tree = SessionTree.create("queued")
+            val first = tree.append(AgentMessage.User("原始问题"), "first", 1L)
+            store.append("queued", first)
+            val queued = QueuedUserInput("queue-one", QueuedInputKind.FOLLOW_UP,
+                "继续处理", "first", 2L)
+            store.enqueueInput("queued", queued)
+            assertEquals(listOf(queued), store.load("queued")!!.pendingQueuedInputs())
+            val applied = tree.append(AgentMessage.User("继续处理"), "applied", 3L)
+            store.appendQueuedMessage("queued", applied, queued.id)
+            val restored = store.load("queued")!!
+            assertEquals(emptyList<QueuedUserInput>(), restored.pendingQueuedInputs())
+            assertEquals(setOf(queued.id), restored.consumedQueuedInputIds())
+            assertEquals("继续处理", (restored.activeEntries().last().message as AgentMessage.User).text)
+            val removed = QueuedUserInput("queue-two", QueuedInputKind.FOLLOW_UP,
+                "取消这条", "applied", 4L)
+            store.enqueueInput("queued", removed)
+            store.discardQueuedInput("queued", removed.id)
+            assertEquals(emptyList<QueuedUserInput>(), store.load("queued")!!.pendingQueuedInputs())
+        } finally {
+            db.close()
         }
     }
 

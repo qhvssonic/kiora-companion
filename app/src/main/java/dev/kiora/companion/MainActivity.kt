@@ -33,6 +33,8 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.content.FileProvider
 import dev.kiora.core.AgentEvent
+import dev.kiora.core.AgentMessage
+import dev.kiora.core.QueuedUserInput
 import dev.kiora.core.ToolAuthorization
 import dev.kiora.core.ToolAuthorizationRequest
 import dev.kiora.speech.Pcm16Audio
@@ -41,10 +43,12 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -67,6 +71,8 @@ class MainActivity : Activity() {
     private lateinit var emptyState: View
     private lateinit var composer: EditText
     private lateinit var sendButton: TextView
+    private lateinit var queuePanel: LinearLayout
+    private var queueExpanded = false
     private lateinit var voiceButton: TextView
     private lateinit var attachmentStrip: LinearLayout
     private lateinit var attachmentContainer: View
@@ -93,6 +99,13 @@ class MainActivity : Activity() {
     private var conversationJob: Job? = null
     private var conversationLoading = true
     private var busy = false
+    private var sendJob: Job? = null
+    private var initialUserEventPending = false
+    private var answerShownInRun = false
+    private var queueItems: List<QueuedUserInput> = emptyList()
+    private var queueRefreshVersion = 0
+    private var queueSubmitting = false
+    private var guidingQueued = false
     private val connectMutex = Mutex()
     private var connectionRequest = 0
     private var connecting = false
@@ -106,6 +119,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        queueExpanded = savedInstanceState?.getBoolean("queue_expanded") ?: false
         pendingCaptureFile = savedInstanceState?.getString("pending_capture_path")?.let(::File)
         savedInstanceState?.getStringArrayList("selected_uris")
             ?.mapTo(selectedUris, Uri::parse)
@@ -165,6 +179,7 @@ class MainActivity : Activity() {
         outState.putStringArrayList("selected_uris", ArrayList(selectedUris.map(Uri::toString)))
         outState.putStringArrayList("captured_paths", ArrayList(capturedFiles.values.map(File::getAbsolutePath)))
         outState.putString("composer_draft", composer.text.toString())
+        outState.putBoolean("queue_expanded", queueExpanded)
         super.onSaveInstanceState(outState)
     }
 
@@ -225,6 +240,17 @@ class MainActivity : Activity() {
         emptyState = buildEmptyState()
         content.addView(emptyState, FrameLayout.LayoutParams(-1, -1))
 
+        queuePanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.END
+            visibility = View.GONE
+        }
+        content.addView(queuePanel, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
+            leftMargin = dp(14)
+            rightMargin = dp(14)
+            bottomMargin = dp(8)
+        })
+
         status = TextView(this).apply {
             text = "请先配置模型"
             textSize = 12f
@@ -274,6 +300,11 @@ class MainActivity : Activity() {
             setPadding(dp(9), dp(5), dp(9), dp(4))
         }
         composerShell.addView(composer, LinearLayout.LayoutParams(-1, -2))
+        composer.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: Editable?) { updateSendControl() }
+        })
         val composerActions = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
         }
@@ -300,7 +331,142 @@ class MainActivity : Activity() {
             setOnClickListener { sendMessage() }
         }
         composerActions.addView(sendButton, LinearLayout.LayoutParams(dp(40), dp(40)))
+        updateSendControl()
         buildDrawer(host)
+    }
+
+    private fun updateSendControl() {
+        if (!::sendButton.isInitialized || !::composer.isInitialized) return
+        val stopping = busy && queueItems.isNotEmpty() && composer.text.isBlank() && selectedUris.isEmpty()
+        sendButton.text = if (stopping) "■" else "↑"
+        sendButton.textSize = if (stopping) 21f else 25f
+        sendButton.contentDescription = when {
+            stopping -> "停止当前任务"
+            busy || queueItems.isNotEmpty() -> "加入队列"
+            else -> "发送"
+        }
+    }
+
+    private fun renderQueue() {
+        if (!::queuePanel.isInitialized) return
+        queuePanel.removeAllViews()
+        queuePanel.visibility = if (queueItems.isEmpty()) View.GONE else View.VISIBLE
+        updateSendControl()
+        if (queueItems.isEmpty()) queueExpanded = false
+        if (::transcript.isInitialized) transcript.setPadding(dp(18), dp(20), dp(8),
+            dp(if (queueItems.isEmpty()) 24 else if (queueExpanded) 240 else 72))
+        if (queueItems.isEmpty()) return
+        if (!queueExpanded) {
+            queuePanel.addView(TextView(this).apply {
+                text = if (busy) "排队 · ${queueItems.size}  ⌃" else "待继续 · ${queueItems.size}  ⌃"
+                contentDescription = "展开队列，${queueItems.size} 条待处理指令"
+                textSize = 13f
+                gravity = Gravity.CENTER
+                setTextColor(INK)
+                setPadding(dp(14), 0, dp(14), 0)
+                background = rounded(Color.WHITE, 22, STROKE)
+                setOnClickListener {
+                    queueExpanded = true
+                    composer.clearFocus()
+                    (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
+                        .hideSoftInputFromWindow(composer.windowToken, 0)
+                    renderQueue()
+                }
+            }, LinearLayout.LayoutParams(-2, dp(42)))
+            return
+        }
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(9))
+            background = rounded(Color.WHITE, 18, STROKE)
+            clipToOutline = true
+        }
+        queuePanel.addView(card, LinearLayout.LayoutParams(-1, -2))
+        val header = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        card.addView(header, LinearLayout.LayoutParams(-1, dp(36)))
+        header.addView(TextView(this).apply {
+            text = if (busy) "排队中 · ${queueItems.size} 条" else "队列已暂停 · ${queueItems.size} 条"
+            textSize = 13f
+            setTextColor(MUTED)
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        if (!busy) header.addView(TextView(this).apply {
+            text = "▶ 继续"
+            contentDescription = "继续处理排队指令"
+            textSize = 14f
+            setTextColor(INK)
+            setPadding(dp(9), dp(4), dp(4), dp(4))
+            setOnClickListener {
+                queueExpanded = false
+                renderQueue()
+                continueQueue()
+            }
+        })
+        header.addView(TextView(this).apply {
+            text = "⌄"
+            contentDescription = "收起队列"
+            textSize = 22f
+            gravity = Gravity.CENTER
+            setTextColor(MUTED)
+            setOnClickListener {
+                queueExpanded = false
+                renderQueue()
+            }
+        }, LinearLayout.LayoutParams(dp(40), dp(36)))
+        val scroll = object : ScrollView(this) {
+            override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                super.onMeasure(widthMeasureSpec,
+                    View.MeasureSpec.makeMeasureSpec(dp(156), View.MeasureSpec.AT_MOST))
+            }
+        }.apply { isVerticalScrollBarEnabled = false }
+        card.addView(scroll, LinearLayout.LayoutParams(-1, -2))
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        scroll.addView(list)
+        queueItems.forEach { item ->
+            val row = LinearLayout(this).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(4), dp(5), dp(3), dp(5))
+            }
+            list.addView(row, LinearLayout.LayoutParams(-1, -2))
+            row.addView(TextView(this).apply {
+                text = "↳  ${item.text}"
+                textSize = 15f
+                setTextColor(INK)
+                maxLines = 2
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(TextView(this).apply {
+                text = "引导"
+                contentDescription = "引导此排队指令：${item.text.take(30)}"
+                textSize = 14f
+                setTextColor(MUTED)
+                setPadding(dp(9), dp(7), dp(8), dp(7))
+                setOnClickListener {
+                    queueExpanded = false
+                    renderQueue()
+                    guideQueued(item.id)
+                }
+            })
+            row.addView(TextView(this).apply {
+                text = "×"
+                contentDescription = "删除此排队指令：${item.text.take(30)}"
+                textSize = 21f
+                setTextColor(MUTED)
+                setPadding(dp(7), dp(3), dp(5), dp(3))
+                setOnClickListener { discardQueued(item.id) }
+            })
+        }
+    }
+
+    private fun refreshQueue() {
+        val id = currentConversationId ?: return
+        val revision = ++queueRefreshVersion
+        scope.launch {
+            val items = runCatching { agent.pendingQueuedInputs(id) }.getOrElse { emptyList() }
+            if (currentConversationId == id && revision == queueRefreshVersion) {
+                queueItems = items
+                renderQueue()
+            }
+        }
     }
 
     private fun buildEmptyState(): View = LinearLayout(this).apply {
@@ -368,17 +534,23 @@ class MainActivity : Activity() {
         transcript.removeAllViews()
         emptyState.visibility = View.GONE
         conversationLoading = true
+        queueRefreshVersion++
+        queueItems = emptyList()
+        renderQueue()
         conversationJob?.cancel()
         conversationJob = scope.launch {
             try {
                 val lines = conversations.lines(id)
                 val modelDetail = agent.latestModelDetail(id)
+                val queued = agent.pendingQueuedInputs(id)
                 if (currentConversationId == id) {
                     lines.forEach { line ->
                         if (line.role == "tool") addToolLine(line.text, restored = true)
                         else addLine(line)
                     }
                     emptyState.visibility = if (transcript.childCount == 0) View.VISIBLE else View.GONE
+                    queueItems = queued
+                    renderQueue()
                     conversationLoading = false
                     if (!loadingDuringConnection && !connecting && !busy &&
                         connectionAtLoad == connectionRequest) {
@@ -519,6 +691,25 @@ class MainActivity : Activity() {
     private suspend fun showToolEvent(event: AgentEvent) {
         val id = currentConversationId ?: return
         when (event) {
+            is AgentEvent.MessageAdded -> when (val message = event.entry.message) {
+                is AgentMessage.User -> {
+                    if (initialUserEventPending) initialUserEventPending = false
+                    else {
+                        val line = ChatLine("user", message.text)
+                        addLine(line)
+                        conversations.append(id, line)
+                        status.text = "正在处理排队指令…"
+                        refreshQueue()
+                    }
+                }
+                is AgentMessage.Assistant -> if (message.toolCalls.isEmpty()) {
+                    val line = ChatLine("assistant", message.text)
+                    showFinalAnswer(line)
+                    conversations.append(id, line)
+                    answerShownInRun = true
+                }
+                else -> Unit
+            }
             is AgentEvent.ToolRequested -> {
                 streamRow?.let(transcript::removeView)
                 clearStream()
@@ -544,6 +735,20 @@ class MainActivity : Activity() {
             }
             else -> Unit
         }
+    }
+
+    private fun showFinalAnswer(line: ChatLine) {
+        if (streamTail != null) {
+            val followBottom = isNearBottom()
+            if (line.text != streamSource.toString()) {
+                streamContent?.removeAllViews()
+                streamCommittedChars = 0
+                streamTail?.let { streamContent?.addView(it, LinearLayout.LayoutParams(-2, -2)) }
+            }
+            renderStreamMarkdown(line.text)
+            clearStream()
+            if (followBottom) scrollToBottom()
+        } else addLine(line)
     }
 
     private fun showDelta(delta: String) {
@@ -655,11 +860,19 @@ class MainActivity : Activity() {
     }
 
     private fun sendMessage() {
+        if (busy && queueItems.isNotEmpty() && composer.text.isBlank() && selectedUris.isEmpty()) {
+            status.text = "正在停止；队列会保留"
+            sendJob?.cancel()
+            return
+        }
         if (voicePending || voiceProcessing) {
             status.text = "请先完成语音转写"
             return
         }
-        if (busy) return
+        if (busy || queueItems.isNotEmpty()) {
+            queueMessage()
+            return
+        }
         if (connecting) {
             status.text = "正在连接模型，请稍候"
             return
@@ -676,6 +889,92 @@ class MainActivity : Activity() {
             return
         }
         performSend(instruction)
+    }
+
+    private fun queueMessage() {
+        val id = currentConversationId ?: return
+        val text = composer.text.toString().trim()
+        if (text.isBlank()) return
+        if (queueSubmitting) return
+        if (selectedUris.isNotEmpty()) {
+            status.text = "排队指令暂不支持附件；请在当前任务结束后发送"
+            return
+        }
+        queueSubmitting = true
+        scope.launch {
+            try {
+                agent.queueFollowUp(id, text)
+                if (composer.text.toString().trim() == text) composer.text.clear()
+                status.text = "已加入队列"
+                refreshQueue()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                status.text = "排队失败：${error.message ?: "请重试"}"
+            } finally {
+                queueSubmitting = false
+            }
+        }
+    }
+
+    private fun guideQueued(queueId: String) {
+        if (guidingQueued) return
+        val id = currentConversationId ?: return
+        guidingQueued = true
+        scope.launch {
+            try {
+                if (busy) {
+                    status.text = "正在引导当前任务…"
+                    val running = sendJob
+                    running?.cancel()
+                    val stopped = withTimeoutOrNull(10_000) { running?.join(); true } ?: false
+                    if (!stopped) {
+                        status.text = "当前推理尚未停止，队列已保留；稍后可再点引导"
+                        return@launch
+                    }
+                }
+                if (currentConversationId != id) return@launch
+                val pending = agent.pendingQueuedInputs(id)
+                if (pending.none { it.id == queueId }) {
+                    status.text = "这条指令已进入会话或被移除"
+                    refreshQueue()
+                    return@launch
+                }
+                if (!modelReady || !agent.hasModel) {
+                    status.text = "请先连接模型，再继续队列"
+                    return@launch
+                }
+                performSend("", queueId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                status.text = "引导失败：${error.message ?: "请重试"}"
+                refreshQueue()
+            } finally {
+                guidingQueued = false
+            }
+        }
+    }
+
+    private fun discardQueued(queueId: String) {
+        val id = currentConversationId ?: return
+        scope.launch {
+            try {
+                agent.discardQueuedInput(id, queueId)
+                status.text = "已从队列移除"
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                status.text = "移除失败：${error.message ?: "指令可能已开始处理"}"
+            } finally {
+                refreshQueue()
+            }
+        }
+    }
+
+    private fun continueQueue() {
+        if (busy || guidingQueued || queueItems.isEmpty()) return
+        guideQueued(queueItems.first().id)
     }
 
     private fun toggleVoice() {
@@ -777,50 +1076,56 @@ class MainActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>,
         grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == RECORD_AUDIO_PERMISSION) {
-            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) startVoice()
-            else status.text = "未获得麦克风权限，无法语音输入"
+        when (requestCode) {
+            RECORD_AUDIO_PERMISSION -> {
+                if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) startVoice()
+                else status.text = "未获得麦克风权限，无法语音输入"
+            }
+            CAMERA_PERMISSION_PHOTO -> {
+                if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) takePhoto()
+                else status.text = "未获得相机权限，无法拍照"
+            }
         }
     }
 
-    private fun performSend(instruction: String) {
-        val files = selectedUris.toList()
+    private fun performSend(instruction: String, queueId: String? = null) {
+        val files = if (queueId == null) selectedUris.toList() else emptyList()
         val id = currentConversationId ?: return
         liveTools.clear()
-        selectedUris.clear()
-        showAttachments()
-        composer.text.clear()
+        if (queueId == null) {
+            selectedUris.clear()
+            showAttachments()
+            composer.text.clear()
+        }
         busy = true
-        sendButton.alpha = 0.4f
-        status.text = "正在发送…"
-        scope.launch {
+        renderQueue()
+        initialUserEventPending = queueId == null
+        answerShownInRun = false
+        status.text = if (queueId == null) "正在发送…" else "正在处理引导指令…"
+        sendJob = scope.launch {
             try {
-                val previews = withContext(Dispatchers.IO) {
-                    val store = MessagePreviews(this@MainActivity)
-                    files.filter(store::isImage).mapNotNull(store::save)
-                }
-                val shown = buildString {
-                    append(instruction.ifBlank { "请处理这些附件" })
-                    val named = files.filterNot { MessagePreviews(this@MainActivity).isImage(it) }
-                    if (named.isNotEmpty()) append("\n").append(named.joinToString("  ") { "📎 ${displayName(it)}" })
-                }
-                val user = ChatLine("user", shown, previews)
-                addLine(user)
-                conversations.append(id, user)
-                status.text = "正在处理…"
-                val reply = agent.send(id, instruction, files)
-                if (streamTail != null) {
-                    val followBottom = isNearBottom()
-                    if (reply.text != streamSource.toString()) {
-                        streamContent?.removeAllViews()
-                        streamCommittedChars = 0
-                        streamTail?.let { streamContent?.addView(it, LinearLayout.LayoutParams(-2, -2)) }
+                if (queueId == null) {
+                    val previews = withContext(Dispatchers.IO) {
+                        val store = MessagePreviews(this@MainActivity)
+                        files.filter(store::isImage).mapNotNull(store::save)
                     }
-                    renderStreamMarkdown(reply.text)
-                    clearStream()
-                    if (followBottom) scrollToBottom()
-                } else addLine(ChatLine("assistant", reply.text))
-                conversations.append(id, ChatLine("assistant", reply.text))
+                    val shown = buildString {
+                        append(instruction.ifBlank { "请处理这些附件" })
+                        val named = files.filterNot { MessagePreviews(this@MainActivity).isImage(it) }
+                        if (named.isNotEmpty()) append("\n").append(named.joinToString("  ") { "📎 ${displayName(it)}" })
+                    }
+                    val user = ChatLine("user", shown, previews)
+                    addLine(user)
+                    conversations.append(id, user)
+                }
+                status.text = "正在处理…"
+                val reply = if (queueId == null) agent.send(id, instruction, files)
+                    else agent.sendQueued(id, queueId)
+                if (reply.attention != null || !answerShownInRun) {
+                    val line = ChatLine("assistant", reply.text)
+                    showFinalAnswer(line)
+                    conversations.append(id, line)
+                }
                 clearCapturedFiles()
                 val state = when (reply.attention) {
                     dev.kiora.core.ToolAttention.INPUT_REQUIRED -> "等待补充信息"
@@ -829,23 +1134,33 @@ class MainActivity : Activity() {
                 }
                 status.text = listOfNotNull(state, reply.modelDetail).joinToString(" · ")
             } catch (cancelled: CancellationException) {
-                throw cancelled
+                streamRow?.let(transcript::removeView)
+                clearStream()
+                status.text = "任务已停止；已执行的外部操作请核对结果"
             } catch (error: Exception) {
                 clearStream()
-                selectedUris.addAll(files)
-                showAttachments()
-                if (composer.text.isBlank()) composer.setText(instruction)
+                if (queueId == null) {
+                    selectedUris.addAll(files)
+                    showAttachments()
+                    if (composer.text.isBlank()) composer.setText(instruction)
+                }
                 status.text = "发送失败：${error.message ?: "未知错误"}"
                 addLine(ChatLine("assistant", "发送失败：${error.message ?: "请检查连接后重试"}"))
             } finally {
-                liveTools.values.forEach { live ->
-                    live.trace = live.trace.copy(state = ToolTrace.State.FAILED, result = "调用中断，未收到结果")
-                    runCatching { conversations.updateTool(live.messageId, live.trace) }
-                    updateToolLine(live.header, live.trace)
+                withContext(NonCancellable) {
+                    liveTools.values.forEach { live ->
+                        live.trace = live.trace.copy(state = ToolTrace.State.FAILED, result = "调用中断，未收到结果")
+                        runCatching { conversations.updateTool(live.messageId, live.trace) }
+                        updateToolLine(live.header, live.trace)
+                    }
+                    liveTools.clear()
+                    busy = false
+                    sendJob = null
+                    initialUserEventPending = false
+                    val pending = runCatching { agent.pendingQueuedInputCount(id) }.getOrDefault(0)
+                    if (pending > 0) status.text = "${status.text} · $pending 条指令待下次处理"
+                    refreshQueue()
                 }
-                liveTools.clear()
-                busy = false
-                sendButton.alpha = 1f
             }
         }
     }
@@ -875,6 +1190,10 @@ class MainActivity : Activity() {
 
     private fun takePhoto() {
         if (busy) { status.text = "请等待当前回复完成"; return }
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.CAMERA), CAMERA_PERMISSION_PHOTO)
+            return
+        }
         val photo = try {
             File.createTempFile("kiora_capture_", ".jpg", File(cacheDir, "captures").apply { mkdirs() })
         } catch (error: Exception) {
@@ -1438,6 +1757,7 @@ class MainActivity : Activity() {
         const val CAPTURE_PHOTO = 14
         const val RECORD_AUDIO_PERMISSION = 15
         const val DOCUMENT_SCAN = 16
+        const val CAMERA_PERMISSION_PHOTO = 17
         const val BG = 0xFFFAFAF8.toInt()
         const val INK = 0xFF20201F.toInt()
         const val MUTED = 0xFF777773.toInt()

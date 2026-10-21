@@ -15,10 +15,10 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        mavenLocal()
         providers.gradleProperty("kioraLocalRepo").orNull?.let { localRepo ->
             maven { url = uri(localRepo) }
         }
-        mavenLocal()
         google()
         mavenCentral()
     }

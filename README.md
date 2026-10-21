@@ -13,6 +13,7 @@ Android 不允许应用直接读取另一个应用的 `Android/data` 目录。�
 - 必须配置手机端使用的模型；电脑端 A2A Agent Card 是可选的工具来源，不是聊天模型或独立聊天模式。自定义模型站点地址可只填 `https://example.com`，SDK 会补全 `/v1/chat/completions`。
 - 设置页可手动添加或扫码添加多个 A2A Agent Card，分别命名、启用、停用、编辑和删除；旧版单连接会自动迁移。接受 `type: "a2a-agent-connect"`、`v: 1` 的二维码 JSON，校验 `agentCardUrl` 与 `token` 后打开连接编辑框；`user`、`scopes` 供核对，扫码本身不授予工具权限。每个连接的 Bearer Token 单独加密存储。不同连接公布的 skill 使用不同工具名，模型与授权界面可分清目标 Agent。
 - 纯文字消息通过 Kiora `AgentRuntime` 运行，模型可按 Agent Card 中的 skill 调用电脑端能力。
+- 任务运行时，继续发送纯文字会直接加入 follow-up 队列。输入框上方显示队列计数胶囊，点开可查看待处理指令；点某条的“引导”会取消当前手机端运行，并从该队列项立即启动新一轮，且不会重复执行它；点“×”可移除未开始的指令。停止后队列保留，点“继续”从首条恢复。发送和停止共用右下角按钮：输入框有文字时用于发送，输入框为空且任务运行中、队列非空时才显示停止图标。排队暂不支持附件；停止不会撤销已经执行的工具操作，也不等同于取消电脑端 A2A 任务。
 - 内置 `get_local_time` 小工具，可在端侧模型模式下验证模型选择工具、参数校验、执行工具和继续回答的完整循环。
 - 默认启用 `read`、`write`、`edit`；`shell` 需在设置页单独启用。`read` 可读取工作区相对路径、`selected:<index>` 指向的本轮已选文本或图片、`authorized:<folderId>/<path>` 指向的已授权文本或图片，以及 `gallery:<photoId>` 指向的照片；图片作为工具结果直接提供给当前视觉模型。`browse_phone_files` 负责发现已授权目录、文件和相册照片；`manage_authorized_file` 负责复制、移动、重命名、删除已授权文件，并在默认授权档逐次询问。底层仍通过 Android 系统接口核验目录与相册权限。系统只授予部分照片时不会声称能够浏览完整相册；聊天中手动选择的照片可直接用于本轮识别，无需逐张授权。
 - 电脑端 Agent Card 公布的每项 skill 才会生成对应 A2A 工具；不再预制笼统的附件发送工具。skill 声明可接收文件 MIME 类型后，模型才可在该 skill 的 `files` 参数中选择本轮已选文件、已授权文件或应用工作区文件。本轮从手机或工作区选择并附加的文件用 `selected:<index>`；直接引用工作区文件用 `workspace:<相对路径>` 或相对路径。`workspace:0` 不能代替 `selected:0`。App 在弹出上传授权前核验文件 ID；无效 ID 作为参数错误返回模型，不显示可允许的授权弹窗。声明 `application/json` 后才会出现 `form` 参数。只有电脑端 Agent 实际公布并实现了相应能力，文件和表单调用才可成功。
@@ -28,7 +29,7 @@ Android 不允许应用直接读取另一个应用的 `Android/data` 目录。�
 - 当前每个会话同时只保留一个待继续的 A2A 任务；任务 ID 与连接 ID 一起保存，重开会话后仍会继续原目标 Agent。
 - 使用同一个 Room 数据库保存会话列表、界面文本记录、SDK 会话树及待继续的 A2A 任务 ID；附件内容不保存在会话中。模型 API Key 按提供商、Bearer Token 单独用 Android Keystore 加密后保存在应用私有存储，重启应用仍可使用；在设置中留空并保存可清除。
 
-会话数据直接写入 Room，不读取旧版 SharedPreferences 对话或 JSONL 会话。Room 会保存 SDK 返回的实际模型 ID 和可用的 token 用量；回复后和重开会话时可在状态栏查看最近一次模型调用。OpenAI、DeepSeek 预置云端接口请求流式用量，其他兼容服务仅在自身返回用量时显示；LiteRT-LM 只记录模型身份。A2A 任务需要输入或授权时，工具记录和状态栏显示等待状态，并保存远端 task ID 供下一轮继续。数据库当前为版本 3，提供从版本 1 到 2、再从 2 到 3 的迁移；结构定义保存在 `app/schemas/`。
+会话数据直接写入 Room，不读取旧版 SharedPreferences 对话或 JSONL 会话。Room 会保存 SDK 返回的实际模型 ID 和可用的 token 用量；回复后和重开会话时可在状态栏查看最近一次模型调用。OpenAI、DeepSeek 预置云端接口请求流式用量，其他兼容服务仅在自身返回用量时显示；LiteRT-LM 只记录模型身份。A2A 任务需要输入或授权时，工具记录和状态栏显示等待状态，并保存远端 task ID 供下一轮继续。数据库当前为版本 4，提供从版本 1 到 2、2 到 3、3 到 4 的迁移；结构定义保存在 `app/schemas/`。
 
 附件总大小上限为 10 MiB。电脑端 Agent 必须能接收 A2A 1.x HTTP+JSON 或 JSONRPC，并处理 `raw` 附件。Debug APK 允许局域网 HTTP；正式构建应使用 HTTPS。
 
@@ -67,9 +68,11 @@ python .\scripts\install-onnxruntime-coexist.py
 
 APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。在聊天输入栏点「＋」→「扫描文档」，拍照或选图片后，可看 PP-OCRv6 的原文、行数和耗时；识别文字会填入编辑框，修改并保存后再用于聊天。安装后点右上角设置，选择提供商和模型，填写密钥；如需电脑端能力，再配置 A2A Agent Card。聊天顶部可切换当前提供商的预置模型，左上角可搜索与切换历史会话。只有 Agent Card 声明了相应文件输入能力、模型调用该 skill 并通过工具授权时，App 才会上传文件。
 
+设备测试应使用独立测试机或模拟器。Android Gradle 的 `connectedDebugAndroidTest` 在本项目的一次真机测试后卸载了目标 App；其私有会话、设置、授权信息和已导入模型随卸载清除。日常更新已配置的手机应使用 `adb install -r` 覆盖安装，并在测试前另行备份需要保留的数据。
+
 ## SDK 集成位置
 
-`app/build.gradle.kts` 引用 Kiora SDK 模块；`settings.gradle.kts` 优先使用 `-PkioraLocalRepo` 指定的 Maven 仓库，再查找 `mavenLocal()`。`CompanionAgent` 将模型、A2A、会话存储、工具授权和文件读取组合起来；`MainActivity` 负责界面、系统选择器及发送确认。
+`app/build.gradle.kts` 引用 Kiora SDK 模块；`settings.gradle.kts` 先查找 `mavenLocal()` 中最新发布的 SDK，再使用 `-PkioraLocalRepo` 指定的本地仓库补齐第三方依赖。修改 SDK `core` 后先运行 `:core:publishToMavenLocal`，再构建 Companion。`CompanionAgent` 将模型、A2A、会话存储、工具授权和文件读取组合起来；`MainActivity` 负责界面、系统选择器及发送确认。
 
 当前版本处理文本与小型内联附件；较大文件、远端返回文件下载和后台任务通知留待后续版本。
 

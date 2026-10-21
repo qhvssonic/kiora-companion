@@ -1,8 +1,10 @@
 package dev.kiora.companion
 
+import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.graphics.Color
 import android.graphics.Typeface
@@ -182,6 +184,7 @@ class SettingsActivity : Activity() {
 
         section(content, "手机文件与相册")
         foldersValue = selectionRow(content, "授权目录") { chooseFolder() }
+        content.addView(note("Android 不允许授权 Download 或手机存储的根目录。要使用下载的文件，请在 Download 中新建子文件夹，把文件移入后授权该子文件夹。"))
         galleryValue = selectionRow(content, "相册访问") { chooseGalleryAccess() }
         content.addView(note("目录由你逐个选择；相册获得 Android 完整照片权限后可直接浏览。聊天中手动选中的照片也可直接识别。"))
         refreshStorageGrants()
@@ -538,6 +541,10 @@ class SettingsActivity : Activity() {
     }
 
     private fun scanA2aQr() {
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.CAMERA), REQUEST_CAMERA_QR)
+            return
+        }
         try {
             IntentIntegrator(this)
                 .setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
@@ -591,7 +598,7 @@ class SettingsActivity : Activity() {
     private fun chooseFolder() {
         val existing = storageGrants.folders()
         SettingsSheet.showOptions(this, "授权目录", "手机文件与相册",
-            listOf(SettingsSheet.Option("添加目录", "通过系统文件选择器授权")) +
+            listOf(SettingsSheet.Option("添加目录", "Download 根目录不可选，可授权其中的子文件夹")) +
                 existing.map { SettingsSheet.Option(grantName(it), "点按撤销此目录授权", true) }) { index ->
             if (index == 0) startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), PICK_FOLDER)
             else {
@@ -636,6 +643,13 @@ class SettingsActivity : Activity() {
         grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_GALLERY_ACCESS) refreshStorageGrants()
+        if (requestCode == REQUEST_CAMERA_QR) {
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) scanA2aQr()
+            else {
+                scanValue.text = "扫码需要相机权限  ›"
+                scanDetails.text = "未获得相机权限，无法扫描连接二维码。"
+            }
+        }
     }
 
     private fun grantName(uri: Uri): String = runCatching {
@@ -748,6 +762,7 @@ class SettingsActivity : Activity() {
         const val REQUEST_GALLERY_ACCESS = 2303
         const val PICK_VOICE_MODEL = 2304
         const val PICK_VOICE_TOKENS = 2305
+        const val REQUEST_CAMERA_QR = 2306
         const val BG = 0xFFFAFAF8.toInt()
         const val PALE = 0xFFF1F3F0.toInt()
         const val INK = 0xFF20201F.toInt()
