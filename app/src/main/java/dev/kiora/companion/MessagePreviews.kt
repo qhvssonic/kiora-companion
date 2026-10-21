@@ -16,10 +16,10 @@ internal class MessagePreviews(private val context: Context) {
             setOf("jpg", "jpeg", "png", "webp", "heic", "heif")
 
     fun save(uri: Uri): String? = runCatching {
-        val bitmap = decode(uri, 960) ?: error("无法读取图片")
+        val bitmap = decode(uri, 2048) ?: error("无法读取图片")
         root.mkdirs()
         val name = "${UUID.randomUUID()}.jpg"
-        File(root, name).outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 78, it) }
+        File(root, name).outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 85, it) }
         bitmap.recycle()
         name
     }.getOrNull()

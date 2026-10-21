@@ -9,7 +9,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
-import android.graphics.BitmapFactory
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
@@ -589,15 +588,26 @@ class MainActivity : Activity() {
         row.addView(bubble, LinearLayout.LayoutParams(-2, -2))
         if (line.role == "user") line.previewImages.forEach { name ->
             MessagePreviews(this).file(name)?.let { file ->
-                bubble.addView(ImageView(this).apply {
-                    val bitmap = BitmapFactory.decodeFile(file.absolutePath)
-                    setImageBitmap(bitmap)
+                val thumbnail = ImageView(this).apply {
                     scaleType = ImageView.ScaleType.CENTER_CROP
                     contentDescription = "查看已发送图片"
                     background = rounded(Color.WHITE, 14)
                     clipToOutline = true
-                    setOnClickListener { showImagePreview(file) }
-                }, LinearLayout.LayoutParams(dp(220), dp(150)).apply { bottomMargin = dp(6) })
+                    setOnClickListener {
+                        showImagePreview(FileProvider.getUriForFile(this@MainActivity,
+                            "$packageName.capture", file))
+                    }
+                }
+                bubble.addView(thumbnail, LinearLayout.LayoutParams(dp(220), dp(150)).apply {
+                    bottomMargin = dp(6)
+                })
+                scope.launch {
+                    val bitmap = withContext(Dispatchers.IO) {
+                        MessagePreviews(this@MainActivity).decode(Uri.fromFile(file), 360)
+                    }
+                    if (thumbnail.parent != null) thumbnail.setImageBitmap(bitmap)
+                    else bitmap?.recycle()
+                }
             }
         }
         return TextView(this).apply {
@@ -613,14 +623,9 @@ class MainActivity : Activity() {
         }.also { scrollToBottom() }
     }
 
-    private fun showImagePreview(file: File) {
-        val image = ImageView(this).apply {
-            setImageBitmap(BitmapFactory.decodeFile(file.absolutePath))
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            contentDescription = "已发送图片预览"
-            setPadding(dp(12), dp(12), dp(12), dp(12))
-        }
-        AlertDialog.Builder(this).setView(image).setPositiveButton("关闭", null).show()
+    private fun showImagePreview(uri: Uri) {
+        startActivity(Intent(this, ImagePreviewActivity::class.java).setData(uri)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
     }
 
     private data class LiveTool(val messageId: Long, var trace: ToolTrace, val header: TextView)
@@ -1358,12 +1363,27 @@ class MainActivity : Activity() {
                 status.text = "扫描草稿无法读取，请重试"
                 return
             }
-            val uri = FileProvider.getUriForFile(this, "$packageName.capture", draft.source)
-            if (uri !in selectedUris) selectedUris.add(uri)
+            // A scanned document is already represented by its corrected OCR text. Sending every
+            // page as vision input would fail on the current LiteRT adapter (one image per turn).
+            // Remove stale attachments from this draft after a failed send or a page reorder.
+            selectedUris.removeAll { uri ->
+                uri.authority == "$packageName.capture" &&
+                    uri.pathSegments.firstOrNull() == "document-drafts" &&
+                    uri.pathSegments.getOrNull(1) == id
+            }
+            val attachOriginal = draft.pages.size == 1 &&
+                selectedUris.none { MessagePreviews(this).isImage(it) }
+            if (attachOriginal) {
+                val page = draft.pages.first()
+                val extension = page.source.extension.ifBlank { "jpg" }
+                selectedUris.add(FileProvider.getUriForFile(this, "$packageName.capture", page.source,
+                    "scan-page-1.$extension"))
+            }
             showAttachments()
             composer.setText("请根据以下扫描原文整理文档，保留可核对的事实。\n\n扫描原文：\n$text\n\n整理要求：")
             composer.setSelection(composer.length())
-            status.text = "扫描原文已填入，请用语音或文字补充整理要求"
+            status.text = if (attachOriginal) "扫描原文和原图已填入，请补充整理要求"
+                else "${draft.pages.size} 页校对文字已填入；原图保留在扫描草稿中，请补充整理要求"
             return
         }
         if (requestCode != PICK_PHOTOS) return
@@ -1391,7 +1411,8 @@ class MainActivity : Activity() {
                 })
                 val image = ImageView(this).apply {
                     scaleType = ImageView.ScaleType.CENTER_CROP
-                    contentDescription = "待发送图片：${displayName(uri)}"
+                    contentDescription = "预览待发送图片：${displayName(uri)}"
+                    setOnClickListener { showImagePreview(uri) }
                 }
                 tile.addView(image, FrameLayout.LayoutParams(-1, -1))
                 tile.addView(TextView(this).apply {

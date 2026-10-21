@@ -2,5 +2,6 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <cache-path name="captures" path="captures/" />
     <files-path name="document-drafts" path="document-drafts/" />
+    <files-path name="message-previews" path="message-previews/" />
     <files-path name="agent-workspace" path="agent-workspace/" />
 </paths>
