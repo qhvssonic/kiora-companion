@@ -6,3 +6,8 @@ build/
 local.properties
 *.iml
 *.apk
+*.aab
+*.keystore
+*.jks
+test-classpath.txt
+diagnose-tests.init.gradle
