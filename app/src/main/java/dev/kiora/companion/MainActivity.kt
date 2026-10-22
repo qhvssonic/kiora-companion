@@ -83,6 +83,7 @@ class MainActivity : Activity() {
     private lateinit var drawerSearch: EditText
     private val selectedUris = mutableListOf<Uri>()
     private val albumTransferUris = mutableSetOf<Uri>()
+    private var scanDraftId: String? = null
     private val capturedFiles = mutableMapOf<Uri, File>()
     private var pendingCaptureFile: File? = null
     private var streamRow: LinearLayout? = null
@@ -126,6 +127,7 @@ class MainActivity : Activity() {
             ?.mapTo(selectedUris, Uri::parse)
         savedInstanceState?.getStringArrayList("album_transfer_uris")
             ?.mapTo(albumTransferUris, Uri::parse)
+        scanDraftId = savedInstanceState?.getString("scan_draft_id")
         savedInstanceState?.getStringArrayList("captured_paths")?.forEach { path ->
             val file = File(path)
             if (file.isFile) {
@@ -185,6 +187,7 @@ class MainActivity : Activity() {
         pendingCaptureFile?.let { outState.putString("pending_capture_path", it.absolutePath) }
         outState.putStringArrayList("selected_uris", ArrayList(selectedUris.map(Uri::toString)))
         outState.putStringArrayList("album_transfer_uris", ArrayList(albumTransferUris.map(Uri::toString)))
+        scanDraftId?.let { outState.putString("scan_draft_id", it) }
         outState.putStringArrayList("captured_paths", ArrayList(capturedFiles.values.map(File::getAbsolutePath)))
         outState.putString("composer_draft", composer.text.toString())
         outState.putBoolean("queue_expanded", queueExpanded)
@@ -1045,7 +1048,8 @@ class MainActivity : Activity() {
             is AgentEvent.ToolRequested -> {
                 streamRow?.let(transcript::removeView)
                 clearStream()
-                val trace = ToolTrace.requested(event.call)
+                val trace = ToolTrace.requested(event.call.copy(arguments =
+                    agent.effectiveSkillArguments(event.call.name, event.call.arguments)))
                 val messageId = conversations.append(id, ChatLine("tool", trace.toStoredText()))
                 liveTools[event.call.id] = LiveTool(messageId, trace, addToolLine(trace.toStoredText()))
             }
@@ -1423,11 +1427,18 @@ class MainActivity : Activity() {
     private fun performSend(instruction: String, queueId: String? = null) {
         val files = if (queueId == null) selectedUris.toList() else emptyList()
         val transferFiles = files.filter { it in albumTransferUris }
+        val scanId = scanDraftId.takeIf { queueId == null && instruction.contains("扫描原文：") }
+        val scanReferenceFiles = files.filter { uri ->
+            scanId != null && uri.authority == "$packageName.capture" &&
+                uri.pathSegments.firstOrNull() == "document-drafts" &&
+                uri.pathSegments.getOrNull(1) == scanId
+        }
         val id = currentConversationId ?: return
         liveTools.clear()
         if (queueId == null) {
             selectedUris.clear()
             albumTransferUris.clear()
+            scanDraftId = null
             showAttachments()
             composer.text.clear()
         }
@@ -1454,7 +1465,8 @@ class MainActivity : Activity() {
                     conversations.append(id, user)
                 }
                 status.text = "正在处理…"
-                val reply = if (queueId == null) agent.send(id, instruction, files, transferFiles)
+                val reply = if (queueId == null) agent.send(id, instruction, files, transferFiles,
+                    scanReferenceFiles, scanId != null)
                     else agent.sendQueued(id, queueId)
                 if (reply.attention != null || !answerShownInRun) {
                     val line = ChatLine("assistant", reply.text)
@@ -1478,6 +1490,7 @@ class MainActivity : Activity() {
                 if (queueId == null) {
                     selectedUris.addAll(files)
                     albumTransferUris.addAll(transferFiles)
+                    scanDraftId = scanId
                     showAttachments()
                     if (composer.text.isBlank()) composer.setText(instruction)
                 }
@@ -1689,6 +1702,7 @@ class MainActivity : Activity() {
                 status.text = "扫描草稿无法读取，请重试"
                 return
             }
+            scanDraftId = id
             // A scanned document is already represented by its corrected OCR text. Sending every
             // page as vision input would fail on the current LiteRT adapter (one image per turn).
             // Remove stale attachments from this draft after a failed send or a page reorder.
@@ -1708,7 +1722,7 @@ class MainActivity : Activity() {
             showAttachments()
             composer.setText("请根据以下扫描原文整理文档，保留可核对的事实。\n\n扫描原文：\n$text\n\n整理要求：")
             composer.setSelection(composer.length())
-            status.text = if (attachOriginal) "扫描原文和原图已填入，请补充整理要求"
+            status.text = if (attachOriginal) "扫描原文和校对原图已填入；原图不会代替整理后的文档发送"
                 else "${draft.pages.size} 页校对文字已填入；原图保留在扫描草稿中，请补充整理要求"
             return
         }
@@ -1957,6 +1971,7 @@ class MainActivity : Activity() {
             clearCapturedFiles()
             selectedUris.clear()
             albumTransferUris.clear()
+            scanDraftId = null
             showAttachments()
             showConversation()
             status.text = "新会话"
@@ -2074,8 +2089,9 @@ class MainActivity : Activity() {
     private suspend fun confirmTool(request: ToolAuthorizationRequest): ToolAuthorization {
         val call = request.call
         val mode = approvalMode()
+        val effectiveArguments = agent.effectiveSkillArguments(call.name, call.arguments)
         val fileIds = runCatching {
-            call.arguments["files"]?.jsonArray?.map { it.jsonPrimitive.content }.orEmpty()
+            effectiveArguments["files"]?.jsonArray?.map { it.jsonPrimitive.content }.orEmpty()
         }.getOrDefault(emptyList())
         val sendsFiles = call.name.startsWith("a2a_") && fileIds.isNotEmpty()
         val fileNames = if (sendsFiles) try {

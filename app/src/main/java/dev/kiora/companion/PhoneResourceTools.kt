@@ -18,6 +18,7 @@ internal class PhoneResourceTools(
     private val authorizedImage: suspend (String, String) -> ToolOutput? = { _, _ -> null },
     private val workspaceImage: suspend (String) -> ToolOutput? = { null },
     private val selectedFile: suspend (String) -> ToolOutput = { error("No file is selected for this turn") },
+    private val normalizeSelectedPath: (String) -> String = { it },
 ) {
     private val storageByName = storage.associateBy { it.definition.name }
     private val galleryByName = gallery.associateBy { it.definition.name }
@@ -35,9 +36,10 @@ internal class PhoneResourceTools(
                 "only read a gallery photo when the user asks to analyze its contents. Images are sent as " +
                 "image content to the current vision model, not as a prior description. " +
                 "An image already attached to the current user message is visible directly; " +
-                "do not use read for its display name or an invented path.",
+                "do not call read merely to see that image or use an invented path. " +
+                "Use workspace:<relativePath> to choose a workspace file when an attachment has the same name.",
             schema(
-                "path" to string("Workspace path, selected:<index>, authorized:<folderId>/<path>, or gallery:gallery_<numericId>"),
+                "path" to string("Workspace path, workspace:<path>, selected:<index>, authorized:<folderId>/<path>, or gallery:gallery_<numericId>"),
                 required = listOf("path"),
             ),
         )
@@ -45,7 +47,7 @@ internal class PhoneResourceTools(
         override suspend fun execute(arguments: JsonObject): String = executeResult(arguments).text
 
         override suspend fun executeResult(arguments: JsonObject): ToolOutput {
-            val path = arguments.value("path")
+            val path = normalizeSelectedPath(arguments.value("path"))
             require(path.isNotBlank()) { "path is required" }
             return when {
                 path.startsWith("selected:") -> selectedFile(path.removePrefix("selected:"))
@@ -71,6 +73,10 @@ internal class PhoneResourceTools(
                     gallery("read_gallery_photo").executeResult(buildJsonObject {
                         put("photoId", photoId)
                     })
+                }
+                path.startsWith("workspace:") -> {
+                    val relative = path.removePrefix("workspace:")
+                    workspaceImage(relative) ?: workspaceRead.executeResult(buildJsonObject { put("path", relative) })
                 }
                 else -> workspaceImage(path) ?: workspaceRead.executeResult(buildJsonObject { put("path", path) })
             }

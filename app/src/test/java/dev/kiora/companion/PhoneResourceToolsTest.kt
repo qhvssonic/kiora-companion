@@ -25,7 +25,7 @@ class PhoneResourceToolsTest {
         }
     }
 
-    private fun tools(): Map<String, AgentTool> {
+    private fun tools(normalizeSelectedPath: (String) -> String = { it }): Map<String, AgentTool> {
         val storage = listOf(
             "list_authorized_folders", "list_authorized_files", "search_authorized_files",
             "inspect_authorized_file", "read_authorized_text", "copy_authorized_file",
@@ -44,7 +44,7 @@ class PhoneResourceToolsTest {
             selectedFile = { id ->
                 calls += Call("selected_file", args("index" to id))
                 ToolOutput("selected text")
-            }).all()
+            }, normalizeSelectedPath = normalizeSelectedPath).all()
             .associateBy { it.definition.name }
     }
 
@@ -70,6 +70,17 @@ class PhoneResourceToolsTest {
         assertEquals("selected text", result.text)
         assertEquals("selected_file", calls.single().name)
         assertEquals("0", calls.single().arguments["index"]?.jsonPrimitive?.content)
+    }
+
+    @Test fun readPrefersTheSelectedAttachmentOverItsFilename() = runBlocking {
+        val aliases = A2aFileIds.selectedAliases(listOf("content://picker/item/1"), listOf("notes.txt"))
+        val read = tools { path -> A2aFileIds.normalize(path, 1, aliases) }.getValue("read")
+        assertEquals("selected text", read.executeResult(args("path" to "notes.txt")).text)
+        assertEquals("selected_file", calls.single().name)
+        calls.clear()
+        read.executeResult(args("path" to "workspace:notes.txt"))
+        assertEquals("workspace_read", calls.single().name)
+        assertEquals("notes.txt", calls.single().arguments["path"]?.jsonPrimitive?.content)
     }
 
     @Test fun readAcceptsNumericGalleryPathFromConversation() = runBlocking {
