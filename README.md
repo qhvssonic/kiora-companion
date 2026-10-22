@@ -1,6 +1,6 @@
 # Kiora Companion
 
-独立的 Android 应用，作为宿主集成 Kiora SDK。当前应用版本为 0.1.83，依赖 SDK `0.3.0-SNAPSHOT`。界面提供可搜索的会话侧边栏、顶部模型选择入口和底部附件输入区，使用 Kiora 自有名称与图标。
+独立的 Android 应用，作为宿主集成 [Kiora SDK](https://github.com/qhvssonic/kiora)。当前应用版本为 0.1.85，依赖 SDK `0.3.0-SNAPSHOT`。它展示移动端智能体的完整流程：选择 LiteRT-LM 或 MNN 本机模型，在手机扫描与整理多页资料、检索相册，再按用户授权通过 A2A 将任务和文件交给电脑端 Agent；也支持兼容在线模型 API。界面提供可搜索的会话侧边栏、顶部模型选择入口和底部附件输入区。
 
 许可证：[Apache-2.0](LICENSE)。上游模型、Android AAR 和 DSH 插件分别遵循其各自的许可证。
 

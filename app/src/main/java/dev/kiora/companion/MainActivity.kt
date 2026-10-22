@@ -2033,7 +2033,7 @@ class MainActivity : Activity() {
             settings.getString("local_model_path", "").orEmpty(),
             settings.getString("local_backend", "cpu").orEmpty(),
             settings.getInt("context_window_tokens", 0).takeIf { it > 0 }
-                ?: ModelContextDefaults.window(providerId, modelId),
+                ?: ModelContextDefaults.WINDOW_TOKENS,
             settings.getString("mnn_config_path", "").orEmpty(),
         )
     }

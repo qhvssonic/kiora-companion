@@ -92,7 +92,7 @@ class SettingsActivity : Activity() {
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         val oldEndpoint = prefs.getString("model_url", "").orEmpty()
         provider = ProviderCatalog.byId(prefs.getString("provider_id", null)).let {
-            if (prefs.contains("provider_id")) it else if (oldEndpoint.isBlank()) ProviderCatalog.options.first()
+            if (prefs.contains("provider_id")) it else if (oldEndpoint.isBlank()) ProviderCatalog.byId("deepseek")
             else ProviderCatalog.infer(oldEndpoint)
         }
         selectedModel = prefs.getString("model_id", "").orEmpty().ifBlank { provider.models.firstOrNull().orEmpty() }
@@ -176,7 +176,7 @@ class SettingsActivity : Activity() {
         contextWindowBlock = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         content.addView(contextWindowBlock)
         contextWindowValue = inputCard(contextWindowBlock, "上下文管理上限（tokens）",
-            "未知时可留空", "", false).apply { inputType = InputType.TYPE_CLASS_NUMBER }
+            "默认 16000", "", false).apply { inputType = InputType.TYPE_CLASS_NUMBER }
         contextWindowNote = note("")
         contextWindowBlock.addView(contextWindowNote)
         localBlock = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -349,7 +349,12 @@ class SettingsActivity : Activity() {
 
     private fun chooseProvider() {
         SettingsSheet.showOptions(this, "选择提供商", "模型服务",
-            ProviderCatalog.options.map { SettingsSheet.Option(it.name, it.note) },
+            ProviderCatalog.options.mapIndexed { index, preset ->
+                val groupTitle = preset.group.title.takeIf {
+                    index == 0 || ProviderCatalog.options[index - 1].group != preset.group
+                }
+                SettingsSheet.Option(preset.name, preset.note, groupTitle = groupTitle)
+            },
             ProviderCatalog.options.indexOf(provider)) { index ->
             val previous = provider
             draftApiKeys[previous.id] = apiKey.text.toString()
@@ -411,15 +416,11 @@ class SettingsActivity : Activity() {
         customModelBlock.visibility = if (manual) View.VISIBLE else View.GONE
         if (manual && selectedModel.isNotBlank()) customModel.setText(selectedModel)
         contextWindowBlock.visibility = View.VISIBLE
-        contextWindowValue.hint = when (provider.id) {
-            "litert" -> "请填写模型包实际窗口"
-            "mnn" -> "留空使用自动摘要"
-            else -> "未知时可留空"
-        }
+        contextWindowValue.hint = "默认 16000，可按需修改"
         contextWindowNote.text = if (provider.id == "mnn")
-            "可留空。Kiora 会在本机历史变长时自动生成摘要；此值仅作输入超限时的保护，不改变 MNN 模型本身的上下文能力。"
+            "Kiora 会在本机历史变长时自动生成摘要；此值用于管理输入，不改变 MNN 模型本身的上下文能力。"
             else if (provider.id == "litert")
-                "Kiora 会在接近窗口时自动摘要较早对话；无法摘要或单轮过长时按实际窗口限制输入。"
+                "Kiora 会在接近此值时自动摘要较早对话；如果模型报告更小的实际窗口，会自动收紧输入。"
             else "填写后，Kiora 会为回复、工具结果和图片预留空间，并按此值管理较早的对话。"
         val contextModel = if (provider.id == "mnn")
             File(mnnConfigPath).parentFile?.name.orEmpty() else selectedModel
@@ -427,8 +428,7 @@ class SettingsActivity : Activity() {
         if (nextContextKey != contextWindowKey) {
             contextWindowKey = nextContextKey
             val saved = prefs.getInt("context_window_$nextContextKey", 0).takeIf { it > 0 }
-            contextWindowValue.setText((saved ?: ModelContextDefaults.window(provider.id, selectedModel))
-                ?.toString().orEmpty())
+            contextWindowValue.setText((saved ?: ModelContextDefaults.WINDOW_TOKENS).toString())
         }
     }
 

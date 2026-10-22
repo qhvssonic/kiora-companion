@@ -91,6 +91,7 @@ class CompanionAgent(
     private val storageTools = AndroidStorageTools(appContext, storageGrants::folders) { emptyList() }
     private val galleryTools = GalleryTools(appContext, ::readModelImage) {
         settings.getInt("context_window_tokens", 0).takeIf { it > 0 }
+            ?: ModelContextDefaults.WINDOW_TOKENS
     }
     private val settings = appContext.getSharedPreferences("companion_settings", Context.MODE_PRIVATE)
     private var connections: Map<String, A2aAgentConnection> = emptyMap()

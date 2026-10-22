@@ -17,7 +17,12 @@ import android.widget.TextView
 
 /** The selection and confirmation surface used by connection settings. */
 internal object SettingsSheet {
-    data class Option(val title: String, val description: String = "", val destructive: Boolean = false)
+    data class Option(
+        val title: String,
+        val description: String = "",
+        val destructive: Boolean = false,
+        val groupTitle: String? = null,
+    )
 
     private const val INK = 0xFF20201F.toInt()
     private const val MUTED = 0xFF777773.toInt()
@@ -49,6 +54,12 @@ internal object SettingsSheet {
         })
 
         options.forEachIndexed { index, option ->
+            option.groupTitle?.let { groupTitle ->
+                list.addView(activity.label(groupTitle, 12f, MUTED, true).apply {
+                    setPadding(activity.dp(4), activity.dp(if (index == 0) 0 else 12),
+                        0, activity.dp(9))
+                })
+            }
             val selected = index == selectedIndex
             val row = LinearLayout(activity).apply {
                 gravity = Gravity.CENTER_VERTICAL
