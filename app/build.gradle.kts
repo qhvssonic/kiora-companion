@@ -11,8 +11,8 @@ android {
         applicationId = "dev.kiora.companion"
         minSdk = 26
         targetSdk = 34
-        versionCode = 82
-        versionName = "0.1.81"
+        versionCode = 83
+        versionName = "0.1.82"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         if (providers.gradleProperty("ocrCompareArm64Only").isPresent) {
             ndk.abiFilters += "arm64-v8a"
@@ -45,7 +45,7 @@ dependencies {
     implementation("dev.kiora:kiora-a2a:0.3.0-SNAPSHOT")
     implementation("dev.kiora:kiora-android-attachments:0.3.0-SNAPSHOT")
     implementation("dev.kiora:kiora-android-storage-tools:0.3.0-SNAPSHOT")
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.21.1-kiora-coexist")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.28.0-kiora-ort1.28.2")
     implementation("dev.kiora:kiora-document-ocr-paddle:0.3.0-SNAPSHOT") {
         exclude(group = "com.microsoft.onnxruntime", module = "onnxruntime-android")
     }

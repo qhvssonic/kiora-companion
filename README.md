@@ -1,6 +1,6 @@
 # Kiora Companion
 
-独立的 Android 应用，作为宿主集成 Kiora SDK。当前应用版本为 0.1.81，依赖 SDK `0.3.0-SNAPSHOT`。界面提供可搜索的会话侧边栏、顶部模型选择入口和底部附件输入区，使用 Kiora 自有名称与图标。
+独立的 Android 应用，作为宿主集成 Kiora SDK。当前应用版本为 0.1.82，依赖 SDK `0.3.0-SNAPSHOT`。界面提供可搜索的会话侧边栏、顶部模型选择入口和底部附件输入区，使用 Kiora 自有名称与图标。
 
 许可证：[Apache-2.0](LICENSE)。上游模型、Android AAR 和 DSH 插件分别遵循其各自的许可证。
 
@@ -62,11 +62,11 @@ cd ..\kiora
 cd ..\kiora-companion
 python -m pip install --target ..\artifacts\py-lief lief==1.0.0
 $env:PYTHONPATH = (Resolve-Path ..\artifacts\py-lief).Path
-python .\scripts\install-onnxruntime-coexist.py
+python .\scripts\install-onnxruntime-shared.py
 .\gradlew.bat :app:assembleDebug -PkioraLocalRepo=..\artifacts\maven
 ```
 
-脚本校验官方 ONNX Runtime 1.21.1 AAR 的 SHA-256，只改动 OCR 所用原生库的名称与链接依赖，并在本地 Maven 仓库生成 `1.21.1-kiora-coexist`。这是为了让 PP-OCRv6 与 SenseVoice 各自加载兼容的 ONNX Runtime；不能以 Gradle 的 `pickFirst` 随机选一份同名库。默认调试 APK 含四种 ABI。
+脚本校验官方 ONNX Runtime 1.28.0 Android AAR 和 sherpa-onnx 1.13.8 AAR 的 SHA-256，借助 LIEF 将 OCR Java/JNI 桥接库的 ELF 符号版本要求改为 `VERS_1.28.2`，并移除其自带的 ONNX Runtime 原生库。本地 Maven 生成 `1.28.0-kiora-ort1.28.2`，使 PP-OCRv6 和 SenseVoice 共用 sherpa-onnx 提供的 ONNX Runtime 1.28.2；Java/JNI 代码仍来自官方 1.28.0 AAR。不能以 Gradle 的 `pickFirst` 随机选一份同名库。独立预览版已在同一手机进程中通过 OCR → SenseVoice → OCR 测试。默认调试 APK 含四种 ABI。
 
 只在 arm64 手机测试时，可给构建命令加 `-PocrCompareArm64Only`，显著减小 APK；这份包不能安装到 x86 模拟器。
 
