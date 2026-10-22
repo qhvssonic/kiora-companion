@@ -169,14 +169,8 @@ class CompanionAgent(
                 backend = if (config.localBackend == "gpu") LiteRtBackend.GPU else LiteRtBackend.CPU,
                 cacheDirectory = File(appContext.cacheDir, "litert"),
                 enableVision = true,
-            ).also {
-                onStatus("正在加载本地模型…")
-                it.prepare()
-            }
-            usesMnn -> MnnModelPort(File(config.mnnConfigPath)).also {
-                onStatus("正在加载 MNN 本地模型…")
-                it.prepare()
-            }
+            )
+            usesMnn -> MnnModelPort(File(config.mnnConfigPath))
             config.modelUrl.isNotBlank() && config.modelId.isNotBlank() -> {
                 val providerId = config.providerId.ifBlank { ProviderCatalog.infer(config.modelUrl).id }
                 CompatibleModelProviders(listOf(CompatibleProvider(
@@ -190,119 +184,138 @@ class CompanionAgent(
             else -> null
         }
         requireNotNull(model) { "请先配置模型；电脑端 A2A 只提供工具" }
-        val remoteSkills = config.a2aConnections.flatMap { profile ->
-            discovered[profile.id]?.skillTools(
-                fileLoader = ::loadSkillFiles,
-                fileIdValidator = ::validateSkillFileIds,
-                argumentValidator = { arguments -> validateRemoteSkillArguments(profile.id, arguments) },
-                requireFileSource = true,
-                resultSender = { message, taskId -> submitRemoteMessage(profile.id, message, taskId) },
-                toolNamePrefix = "a2a_${profile.id.take(12)}",
-            )?.map { RemoteSkill(profile, it) }.orEmpty()
-        }
-        val remoteTools = remoteSkills.map { it.tool }
-        require(remoteTools.map { it.definition.name }.distinct().size == remoteTools.size) {
-            "多个 A2A 技能的工具名称冲突"
-        }
-        val workspaceTools = WorkspaceTools(File(appContext.filesDir, "agent-workspace"), "/system/bin/sh").all()
-        val phoneTools = PhoneResourceTools(
-            workspaceTools.first { it.definition.name == "read" }, storageTools.all(), galleryTools.all(),
-            authorizedImage = { folderId, path ->
-                val file = withContext(Dispatchers.IO) { storageTools.authorizedFile(folderId, path) }
-                if (file.mimeType.startsWith("image/"))
-                    ToolOutput("Image from authorized file: ${file.name}", listOf(readModelImage(file.uri)))
-                else null
-            },
-            workspaceImage = { path -> readWorkspaceImage(path) },
-            selectedFile = ::readSelectedFile,
-        ).all()
-        val tools = phoneTools.take(1) + workspaceTools.filterNot { it.definition.name == "read" } +
-            phoneTools.drop(1) + DeviceTimeTool() + AlbumSearchTool(appContext) + remoteTools
-        val autoCompaction = if (usesLiteRt || usesMnn) {
-            val trigger = minOf(config.contextWindowTokens?.let { it * 3 / 4 } ?: 16_384,
-                16_384).coerceAtLeast(512)
-            AutoCompaction(trigger, SessionSummarizer { earlier ->
-                onStatus("正在整理较早的对话…")
-                val history = earlier.map { message ->
-                    when (message) {
-                        is AgentMessage.User -> if (message.images.isEmpty()) message else
-                            message.copy(text = message.text + "\n[原消息包含图片，摘要时未重复载入]",
-                                images = emptyList())
-                        is AgentMessage.ToolResult -> if (message.images.isEmpty()) message else
-                            message.copy(text = message.text + "\n[原工具结果包含图片，摘要时未重复载入]",
-                                images = emptyList())
-                        else -> message
-                    }
+        try {
+            when (model) {
+                is LiteRtModelPort -> {
+                    onStatus("正在加载本地模型…")
+                    model.prepare()
                 }
-                val answer = model.respond(history + AgentMessage.User(
-                    "请将上述较早对话压缩为简洁的中文会话摘要，供后续继续任务。" +
-                        "保留用户目标、明确约束、已完成步骤、关键路径和未解决事项；" +
-                        "只根据对话记录陈述事实，不执行任何工具，也不要添加新建议。"), emptyList())
-                answer.text.trim().take(8_000)
-            })
-        } else null
-        val agent = AgentRuntime(
-                model = model,
-                tools = tools,
-                store = store,
-                authorizer = authorize,
-                activeTools = ActiveToolSelector { _, available ->
-                    CompanionToolSelection(
-                        shellEnabled = settings.getBoolean("enable_shell", false),
-                        hasFolders = storageGrants.folders().isNotEmpty(),
-                        hasGallery = GalleryAccess.hasFullAccess(appContext),
-                        hasAlbumSearch = AlbumSearchService.isReady(appContext),
-                        remoteTools = remoteSkillsByToolName.filterValues { skill ->
-                            remoteTurn?.connectionId?.let { it == skill.profile.id } ?: true
-                        }.keys,
-                        imageOnlyQuestion = imageOnlyQuestion,
-                        remoteAgentRequested = remoteAgentRequested,
-                        phoneShellRequested = phoneShellRequested,
-                    ).select(available)
+                is MnnModelPort -> {
+                    onStatus("正在加载 MNN 本地模型…")
+                    model.prepare()
+                }
+            }
+            val remoteSkills = config.a2aConnections.flatMap { profile ->
+                discovered[profile.id]?.skillTools(
+                    fileLoader = ::loadSkillFiles,
+                    fileIdValidator = ::validateSkillFileIds,
+                    argumentValidator = { arguments -> validateRemoteSkillArguments(profile.id, arguments) },
+                    requireFileSource = true,
+                    resultSender = { message, taskId -> submitRemoteMessage(profile.id, message, taskId) },
+                    toolNamePrefix = "a2a_${profile.id.take(12)}",
+                )?.map { RemoteSkill(profile, it) }.orEmpty()
+            }
+            val remoteTools = remoteSkills.map { it.tool }
+            require(remoteTools.map { it.definition.name }.distinct().size == remoteTools.size) {
+                "多个 A2A 技能的工具名称冲突"
+            }
+            val workspaceTools = WorkspaceTools(File(appContext.filesDir, "agent-workspace"), "/system/bin/sh").all()
+            val phoneTools = PhoneResourceTools(
+                workspaceTools.first { it.definition.name == "read" }, storageTools.all(), galleryTools.all(),
+                authorizedImage = { folderId, path ->
+                    val file = withContext(Dispatchers.IO) { storageTools.authorizedFile(folderId, path) }
+                    if (file.mimeType.startsWith("image/"))
+                        ToolOutput("Image from authorized file: ${file.name}", listOf(readModelImage(file.uri)))
+                    else null
                 },
-                contextTransformer = ModelContextTransformer { messages ->
-                    if (!usesMnn || (model as? MnnModelPort)?.supportsVision == true) messages
-                    else messages.map { message ->
+                workspaceImage = { path -> readWorkspaceImage(path) },
+                selectedFile = ::readSelectedFile,
+            ).all()
+            val tools = phoneTools.take(1) + workspaceTools.filterNot { it.definition.name == "read" } +
+                phoneTools.drop(1) + DeviceTimeTool() + AlbumSearchTool(appContext) + remoteTools
+            val autoCompaction = if (usesLiteRt || usesMnn) {
+                val trigger = minOf(config.contextWindowTokens?.let { it * 3 / 4 } ?: 16_384,
+                    16_384).coerceAtLeast(512)
+                AutoCompaction(trigger, SessionSummarizer { earlier ->
+                    onStatus("正在整理较早的对话…")
+                    val history = earlier.map { message ->
                         when (message) {
                             is AgentMessage.User -> if (message.images.isEmpty()) message else
-                                message.copy(text = message.text + "\n[Earlier images are unavailable to this model.]",
+                                message.copy(text = message.text + "\n[原消息包含图片，摘要时未重复载入]",
                                     images = emptyList())
                             is AgentMessage.ToolResult -> if (message.images.isEmpty()) message else
-                                message.copy(text = message.text + "\n[Image output unavailable to this model.]",
+                                message.copy(text = message.text + "\n[原工具结果包含图片，摘要时未重复载入]",
                                     images = emptyList())
                             else -> message
                         }
                     }
-                },
-                contextWindowTokens = config.contextWindowTokens,
-                reserveOutputTokens = if (usesLiteRt || usesMnn) 768 else 4_096,
-                autoCompaction = autoCompaction,
-                autoRunFollowUps = false,
-                limits = if (usesLiteRt || usesMnn) RunLimits(timeoutMillis = 300_000) else RunLimits(),
-                events = { event ->
-                    when (event) {
-                        is AgentEvent.AssistantTextDelta -> withContext(Dispatchers.Main) { onDelta(event.delta) }
-                        is AgentEvent.ToolRequested -> withContext(Dispatchers.Main) {
-                            onStatus("正在请求 ${event.call.name}…")
-                            onToolEvent(event)
+                    val answer = model.respond(history + AgentMessage.User(
+                        "请将上述较早对话压缩为简洁的中文会话摘要，供后续继续任务。" +
+                            "保留用户目标、明确约束、已完成步骤、关键路径和未解决事项；" +
+                            "只根据对话记录陈述事实，不执行任何工具，也不要添加新建议。"), emptyList())
+                    answer.text.trim().take(8_000)
+                })
+            } else null
+            val agent = AgentRuntime(
+                    model = model,
+                    tools = tools,
+                    store = store,
+                    authorizer = authorize,
+                    activeTools = ActiveToolSelector { _, available ->
+                        CompanionToolSelection(
+                            shellEnabled = settings.getBoolean("enable_shell", false),
+                            hasFolders = storageGrants.folders().isNotEmpty(),
+                            hasGallery = GalleryAccess.hasFullAccess(appContext),
+                            hasAlbumSearch = AlbumSearchService.isReady(appContext),
+                            remoteTools = remoteSkillsByToolName.filterValues { skill ->
+                                remoteTurn?.connectionId?.let { it == skill.profile.id } ?: true
+                            }.keys,
+                            imageOnlyQuestion = imageOnlyQuestion,
+                            remoteAgentRequested = remoteAgentRequested,
+                            phoneShellRequested = phoneShellRequested,
+                        ).select(available)
+                    },
+                    contextTransformer = ModelContextTransformer { messages ->
+                        if (!usesMnn || (model as? MnnModelPort)?.supportsVision == true) messages
+                        else messages.map { message ->
+                            when (message) {
+                                is AgentMessage.User -> if (message.images.isEmpty()) message else
+                                    message.copy(text = message.text + "\n[Earlier images are unavailable to this model.]",
+                                        images = emptyList())
+                                is AgentMessage.ToolResult -> if (message.images.isEmpty()) message else
+                                    message.copy(text = message.text + "\n[Image output unavailable to this model.]",
+                                        images = emptyList())
+                                else -> message
+                            }
                         }
-                        is AgentEvent.ToolCompleted -> withContext(Dispatchers.Main) { onToolEvent(event) }
-                        is AgentEvent.MessageAdded -> withContext(Dispatchers.Main) { onToolEvent(event) }
-                        else -> Unit
-                    }
-                },
-            )
-        localModel = model as? LiteRtModelPort
-        mnnModel = model as? MnnModelPort
-        connections = discovered
-        configuredConnections = config.a2aConnections
-        remoteSkillsByToolName = remoteSkills.associateBy { it.tool.definition.name }
-        runtime = agent
-        when {
-            discovered.isNotEmpty() -> "模型就绪 · ${discovered.size} 个 A2A Agent 已连接" +
-                if (failedConnections > 0) "（${failedConnections} 个暂不可用）" else ""
-            failedConnections > 0 -> "模型就绪 · A2A Agent 暂不可用"
-            else -> "模型就绪"
+                    },
+                    contextWindowTokens = config.contextWindowTokens,
+                    reserveOutputTokens = if (usesLiteRt || usesMnn) 768 else 4_096,
+                    autoCompaction = autoCompaction,
+                    autoRunFollowUps = false,
+                    limits = if (usesLiteRt || usesMnn) RunLimits(timeoutMillis = 300_000) else RunLimits(),
+                    events = { event ->
+                        when (event) {
+                            is AgentEvent.AssistantTextDelta -> withContext(Dispatchers.Main) { onDelta(event.delta) }
+                            is AgentEvent.ToolRequested -> withContext(Dispatchers.Main) {
+                                onStatus("正在请求 ${event.call.name}…")
+                                onToolEvent(event)
+                            }
+                            is AgentEvent.ToolCompleted -> withContext(Dispatchers.Main) { onToolEvent(event) }
+                            is AgentEvent.MessageAdded -> withContext(Dispatchers.Main) { onToolEvent(event) }
+                            else -> Unit
+                        }
+                    },
+                )
+            localModel = model as? LiteRtModelPort
+            mnnModel = model as? MnnModelPort
+            connections = discovered
+            configuredConnections = config.a2aConnections
+            remoteSkillsByToolName = remoteSkills.associateBy { it.tool.definition.name }
+            runtime = agent
+            when {
+                discovered.isNotEmpty() -> "模型就绪 · ${discovered.size} 个 A2A Agent 已连接" +
+                    if (failedConnections > 0) "（${failedConnections} 个暂不可用）" else ""
+                failedConnections > 0 -> "模型就绪 · A2A Agent 暂不可用"
+                else -> "模型就绪"
+            }
+        } catch (failure: Throwable) {
+            // A failed or cancelled configuration must not leave model weights resident.
+            withContext(kotlinx.coroutines.NonCancellable) {
+                (model as? LiteRtModelPort)?.close()
+                (model as? MnnModelPort)?.close()
+            }
+            throw failure
         }
     }
 
