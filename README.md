@@ -1,6 +1,6 @@
 # Kiora Companion
 
-独立的 Android 应用，作为宿主集成 Kiora SDK。当前应用版本为 0.1.69，依赖 SDK `0.3.0-SNAPSHOT`。界面提供可搜索的会话侧边栏、顶部模型选择入口和底部附件输入区，使用 Kiora 自有名称与图标。
+独立的 Android 应用，作为宿主集成 Kiora SDK。当前应用版本为 0.1.81，依赖 SDK `0.3.0-SNAPSHOT`。界面提供可搜索的会话侧边栏、顶部模型选择入口和底部附件输入区，使用 Kiora 自有名称与图标。
 
 许可证：[Apache-2.0](LICENSE)。上游模型、Android AAR 和 DSH 插件分别遵循其各自的许可证。
 
@@ -8,8 +8,10 @@
 
 - 在设置页选择 DeepSeek、OpenAI、LiteRT-LM 本地模型、MNN 本地模型或其他兼容服务。聊天顶部显示当前模型；云端预置模型可直接切换。
 - LiteRT-LM 可导入 `.litertlm` 文件并选择 CPU/GPU。MNN 可导入包含 `config.json`、权重和 tokenizer 的整个模型目录；两种模型都复制到应用私有存储，并在 Companion 进程中推理，无需 MNN Chat 应用或本机 API 服务。MNN 支持文本与流式输出；包含视觉配置、`visual.mnn` 和 `visual.mnn.weight` 的模型可接收图片。工具选择通过受限 JSON 提示协议实现；原生库目前只打包 arm64-v8a。
+- 相册检索使用 SDK 的 EmbeddingGemma 2 适配器。首次使用时，在「设置 → 手机文件与相册」导入官方文字＋视觉 440M `.litertlm` 模型，通过已有的「相册访问」入口授予完整相册或系统选定照片的读取权限，并在设置中分批建立索引，每批最多 100 张。之后直接在聊天中描述想找的照片；首页和侧边栏的「搜索本地相册」会在输入框填入“搜索相册中的图片：”，供用户补充条件后发送。Agent 调用只读 `search_album_photos`，最多返回 3 张排序候选；单张照片直接展示，多张照片默认叠放，可展开逐张查看和放大，不会把已索引总数当作匹配数。仅当用户要求分析照片内容时，Agent 才需要调用 `read(gallery:gallery_<数字ID>)`，将该照片交给视觉模型。索引位于应用私有 SQLite 数据库，只保存照片 ID、版本信息和向量，原图仍由系统相册管理；搜索前会剔除当前已不可访问或已修改照片的旧向量。搜索不会自动扫描或上传照片；若聊天使用云端模型，查询文字及工具返回的照片名称会进入该模型的请求。模型不进入仓库或 APK；模型文件说明及 SHA-256 见 SDK 的 `docs/embeddinggemma2-integration.md`。
 
 Android 不允许应用直接读取另一个应用的 `Android/data` 目录。已有模型若存放在那里，先移到系统文件选择器可见的位置再导入；调试时也可以通过 ADB 复制到 Kiora 的私有 `files/models` 目录，设置页会自动发现该目录中的 `.litertlm` 文件。MNN 模型可通过目录选择器导入；调试时完整复制到私有 `files/mnn-models/<模型目录>/` 后，设置页也会发现其中的 `config.json`。
+- 相册搜索结果可展开并勾选要发送的照片；单张结果可直接点「发送到电脑」。选择已启用且设有触发别名的 A2A 连接后，照片先加入输入框附件，默认指令为保存到电脑桌面，用户可修改并点击发送。此路径把照片当作文件附件，不占用本机模型的单图视觉输入名额；实际上传仍遵循 A2A 工具授权与合计 10 MiB 限制。
 - 必须配置手机端使用的模型；电脑端 A2A Agent Card 是可选的工具来源，不是聊天模型或独立聊天模式。自定义模型站点地址可只填 `https://example.com`，SDK 会补全 `/v1/chat/completions`。
 - 设置页可手动添加或扫码添加多个 A2A Agent Card，分别命名、设置唯一的触发别名、启用、停用、编辑和删除；旧版单连接会自动迁移。旧连接若名为 `DSH Agent`，会自动得到别名 `dsh`。聊天中写“通过 dsh”时，只向模型提供该连接的 A2A 技能。接受 `type: "a2a-agent-connect"`、`v: 1` 的二维码 JSON，校验 `agentCardUrl` 与 `token` 后打开连接编辑框；`user`、`scopes` 供核对，扫码本身不授予工具权限。每个连接的 Bearer Token 单独加密存储。不同连接公布的 skill 使用不同工具名，模型与授权界面可分清目标 Agent。
 - 设置页显示每个 A2A 连接的状态，页面打开时和停留期间约每 15 秒检测一次，也可手动立即检测。检测会读取 Agent Card 并检查其公布的任务端口，不创建远端任务；“已连通”表示网络和 Card 可达，不保证远端工具执行成功。若聊天 Agent 此前发现连接失败，从设置页返回时会重新发现已启用连接，使网络恢复后的状态同步到聊天。
@@ -47,7 +49,7 @@ Android 不允许应用直接读取另一个应用的 `Android/data` 目录。�
 
 ```powershell
 cd ..\kiora
-.\gradlew.bat :core:publishToMavenLocal :a2a:publishToMavenLocal :model-chat:publishToMavenLocal :model-mnn:publishToMavenLocal :model-litert:publishToMavenLocal :android-attachments:publishToMavenLocal :android-storage-tools:publishToMavenLocal :document-ocr:publishToMavenLocal
+.\gradlew.bat :core:publishToMavenLocal :a2a:publishToMavenLocal :model-chat:publishToMavenLocal :model-mnn:publishToMavenLocal :model-litert:publishToMavenLocal :embedding:publishToMavenLocal :embedding-mediapipe:publishToMavenLocal :android-attachments:publishToMavenLocal :android-storage-tools:publishToMavenLocal :document-ocr:publishToMavenLocal
 .\scripts\install-sherpa-onnx.ps1
 .\gradlew.bat :speech:publishToMavenLocal :speech-sherpa-onnx:publishToMavenLocal -PsherpaLocalRepo=..\artifacts\maven
 .\scripts\install-paddle-ocr.ps1
@@ -67,6 +69,8 @@ python .\scripts\install-onnxruntime-coexist.py
 脚本校验官方 ONNX Runtime 1.21.1 AAR 的 SHA-256，只改动 OCR 所用原生库的名称与链接依赖，并在本地 Maven 仓库生成 `1.21.1-kiora-coexist`。这是为了让 PP-OCRv6 与 SenseVoice 各自加载兼容的 ONNX Runtime；不能以 Gradle 的 `pickFirst` 随机选一份同名库。默认调试 APK 含四种 ABI。
 
 只在 arm64 手机测试时，可给构建命令加 `-PocrCompareArm64Only`，显著减小 APK；这份包不能安装到 x86 模拟器。
+
+需要在同一手机上验证新界面而保留已安装应用数据时，可在构建命令中加 `-PcompanionPreview`。这会生成包名为 `dev.kiora.companion.preview` 的独立调试版；它有自己的私有数据和模型目录，不会读取正式版的数据。验证结束后去掉该参数重新构建，产物恢复为正式包名。
 
 APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。在聊天输入栏点「＋」→「扫描文档」，拍摄或导入多页后，可在页码导航中逐页查看原图和 PP-OCRv6 结果、修改文字、调整页序，再用于聊天。安装后点右上角设置，选择提供商和模型，填写密钥；如需电脑端能力，再配置 A2A Agent Card。聊天顶部可切换当前提供商的预置模型，左上角可搜索与切换历史会话。只有 Agent Card 声明了相应文件输入能力、模型调用该 skill 并通过工具授权时，App 才会上传文件。
 

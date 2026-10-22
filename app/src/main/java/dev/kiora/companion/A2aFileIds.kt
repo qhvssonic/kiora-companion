@@ -6,4 +6,11 @@ internal object A2aFileIds {
         val index = id.takeIf { it.isNotEmpty() && it.all(Char::isDigit) }?.toIntOrNull()
         return if (index != null && index < selectedCount) "selected:$index" else id
     }
+
+    fun requireCompleteAlbumTransfer(ids: List<String>, selectedPhotoIds: Set<String>?) {
+        if (selectedPhotoIds == null) return
+        require(ids.toSet() == selectedPhotoIds) {
+            "本轮需同时发送已选的 ${selectedPhotoIds.size} 张照片：${selectedPhotoIds.sorted().joinToString()}"
+        }
+    }
 }

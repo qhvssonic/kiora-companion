@@ -18,7 +18,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
-/** Read-only MediaStore tools. Only available after Android grants full photo access. */
+/** Read-only MediaStore tools; listing requires full access, reading also accepts selected photos. */
 internal class GalleryTools(
     private val context: Context,
     private val loadImage: suspend (Uri) -> ToolImage,
@@ -36,7 +36,7 @@ internal class GalleryTools(
             name = "list_gallery_photos",
             description = "Browse the phone's photo library after full Android photo access is granted. " +
                 "Returns recent photos or filename matches with photo IDs. Use offset to page through the library. " +
-                "Call read with gallery:<photoId> to inspect image content; filenames alone do not reveal the image.",
+                "Call read with gallery:gallery_<numericId> only when the user asks to analyze image content; filenames alone do not reveal the image.",
             parameters = schema(
                 "query" to "Optional filename fragment; omit for recent photos",
                 "limit" to "Requested photos per page; constrained by the current model context window",
@@ -66,10 +66,10 @@ internal class GalleryTools(
         override val definition = ToolDefinition(
             name = "read_gallery_photo",
             description = "Return one gallery photo as image content for the current vision model. " +
-                "Requires full Android photo access. " +
-                "Use an ID from list_gallery_photos; only one image is examined per call.",
+                "Requires full or selected-photo Android access. " +
+                "Use an ID from browse_phone_files or search_album_photos; only one image is examined per call.",
             parameters = schema(
-                "photoId" to "Photo ID returned by list_gallery_photos",
+                "photoId" to "Photo ID returned by list_gallery_photos or search_album_photos",
                 required = listOf("photoId"),
             ),
         )
@@ -77,7 +77,7 @@ internal class GalleryTools(
         override suspend fun execute(arguments: JsonObject): String = executeResult(arguments).text
 
         override suspend fun executeResult(arguments: JsonObject): ToolOutput {
-            requireFullAccess()
+            requirePhotoAccess()
             val id = arguments["photoId"]?.jsonPrimitive?.content.orEmpty()
             val uri = photoUri(id)
             val name = withContext(Dispatchers.IO) { find(id)?.name }
@@ -157,6 +157,12 @@ internal class GalleryTools(
 
     private fun requireFullAccess() {
         require(GalleryAccess.hasFullAccess(context)) { "请先在连接设置中允许访问完整相册" }
+    }
+
+    private fun requirePhotoAccess() {
+        require(GalleryAccess.hasFullAccess(context) || GalleryAccess.hasPartialAccess(context)) {
+            "请先授权可读取的相册照片"
+        }
     }
 
     private fun schema(vararg properties: Pair<String, String>, required: List<String> = emptyList()) =

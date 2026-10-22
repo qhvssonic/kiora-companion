@@ -11,11 +11,18 @@ android {
         applicationId = "dev.kiora.companion"
         minSdk = 26
         targetSdk = 34
-        versionCode = 70
-        versionName = "0.1.69"
+        versionCode = 82
+        versionName = "0.1.81"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         if (providers.gradleProperty("ocrCompareArm64Only").isPresent) {
             ndk.abiFilters += "arm64-v8a"
+        }
+    }
+    buildTypes {
+        getByName("debug") {
+            if (providers.gradleProperty("companionPreview").isPresent) {
+                applicationIdSuffix = ".preview"
+            }
         }
     }
     compileOptions {
@@ -32,6 +39,8 @@ dependencies {
     implementation("dev.kiora:kiora-core:0.3.0-SNAPSHOT")
     implementation("dev.kiora:kiora-model-chat:0.3.0-SNAPSHOT")
     implementation("dev.kiora:kiora-model-litert:0.3.0-SNAPSHOT")
+    implementation("dev.kiora:kiora-embedding:0.3.0-SNAPSHOT")
+    implementation("dev.kiora:kiora-embedding-mediapipe:0.3.0-SNAPSHOT")
     implementation("dev.kiora:kiora-model-mnn:0.3.0-SNAPSHOT")
     implementation("dev.kiora:kiora-a2a:0.3.0-SNAPSHOT")
     implementation("dev.kiora:kiora-android-attachments:0.3.0-SNAPSHOT")

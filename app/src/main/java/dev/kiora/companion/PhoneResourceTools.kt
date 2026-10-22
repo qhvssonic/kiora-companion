@@ -29,13 +29,15 @@ internal class PhoneResourceTools(
             "read",
             "Read a UTF-8 workspace file by relative path, a file selected in this turn as " +
                 "selected:<index>, an authorized folder file as authorized:<folderId>/<relativePath>, " +
-                "or a gallery photo as gallery:<photoId>. " +
-                "Folder IDs and photo IDs come from browse_phone_files. Images are sent as " +
+                "or a gallery photo as gallery:gallery_<numericId>. " +
+                "Folder IDs come from browse_phone_files; photo IDs come from browse_phone_files " +
+                "or search_album_photos. Search results are already displayed as photos in chat; " +
+                "only read a gallery photo when the user asks to analyze its contents. Images are sent as " +
                 "image content to the current vision model, not as a prior description. " +
                 "An image already attached to the current user message is visible directly; " +
                 "do not use read for its display name or an invented path.",
             schema(
-                "path" to string("Workspace path, selected:<index>, authorized:<folderId>/<path>, or gallery:<photoId>"),
+                "path" to string("Workspace path, selected:<index>, authorized:<folderId>/<path>, or gallery:gallery_<numericId>"),
                 required = listOf("path"),
             ),
         )
@@ -60,8 +62,12 @@ internal class PhoneResourceTools(
                     })
                 }
                 path.startsWith("gallery:") -> {
-                    val photoId = path.removePrefix("gallery:")
-                    require(photoId.startsWith("gallery_")) { "Use gallery:<photoId>" }
+                    val rawId = path.removePrefix("gallery:")
+                    val numericId = rawId.removePrefix("gallery_")
+                    require(numericId.isNotEmpty() && numericId.all(Char::isDigit)) {
+                        "Use gallery:gallery_<numericId>"
+                    }
+                    val photoId = "gallery_$numericId"
                     gallery("read_gallery_photo").executeResult(buildJsonObject {
                         put("photoId", photoId)
                     })

@@ -9,6 +9,17 @@ class CompanionToolSelectionTest {
     private val remoteTool = "a2a_dsh_delegate_task"
     private val available = setOf("read", "write", "shell", remoteTool)
 
+    @Test fun indexedAlbumCanBeSearchedWithoutFullGalleryBrowsing() {
+        val offered = available + AlbumSearchTool.NAME + PhoneResourceTools.BROWSE
+        val selected = CompanionToolSelection(shellEnabled = false, hasFolders = false,
+            hasGallery = false, hasAlbumSearch = true, remoteTools = emptySet()).select(offered)
+
+        assertTrue(AlbumSearchTool.NAME in selected)
+        assertTrue("read" in selected)
+        assertFalse(PhoneResourceTools.BROWSE in selected)
+        assertTrue(isLowRiskTool(AlbumSearchTool.NAME))
+    }
+
     @Test fun desktopRequestKeepsA2aAndWorkspaceToolsButHidesPhoneShell() {
         val selected = CompanionToolSelection(shellEnabled = true, hasFolders = false,
             hasGallery = false, remoteTools = setOf(remoteTool),

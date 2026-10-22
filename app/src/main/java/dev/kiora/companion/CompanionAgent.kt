@@ -109,6 +109,7 @@ class CompanionAgent(
     private data class AttachmentTurn(
         val sessionId: String,
         val selected: List<Uri>,
+        val allowedTransferIds: Set<String>? = null,
         var used: Boolean = false,
     )
 
@@ -216,7 +217,7 @@ class CompanionAgent(
             selectedFile = ::readSelectedFile,
         ).all()
         val tools = phoneTools.take(1) + workspaceTools.filterNot { it.definition.name == "read" } +
-            phoneTools.drop(1) + DeviceTimeTool() + remoteTools
+            phoneTools.drop(1) + DeviceTimeTool() + AlbumSearchTool(appContext) + remoteTools
         val autoCompaction = if (usesLiteRt || usesMnn) {
             val trigger = minOf(config.contextWindowTokens?.let { it * 3 / 4 } ?: 16_384,
                 16_384).coerceAtLeast(512)
@@ -250,6 +251,7 @@ class CompanionAgent(
                         shellEnabled = settings.getBoolean("enable_shell", false),
                         hasFolders = storageGrants.folders().isNotEmpty(),
                         hasGallery = GalleryAccess.hasFullAccess(appContext),
+                        hasAlbumSearch = AlbumSearchService.isReady(appContext),
                         remoteTools = remoteSkillsByToolName.filterValues { skill ->
                             remoteTurn?.connectionId?.let { it == skill.profile.id } ?: true
                         }.keys,
@@ -312,24 +314,36 @@ class CompanionAgent(
         mnnModel = null
     }
 
-    suspend fun send(sessionId: String, instruction: String, selected: List<Uri>): CompanionReply =
-        sendInternal(sessionId, instruction, selected, null)
+    suspend fun send(sessionId: String, instruction: String, selected: List<Uri>,
+                     transferPhotos: List<Uri> = emptyList()): CompanionReply =
+        sendInternal(sessionId, instruction, selected, null, transferPhotos)
 
     suspend fun sendQueued(sessionId: String, queueId: String): CompanionReply {
         val input = pendingQueuedInputs(sessionId).firstOrNull { it.id == queueId }
             ?: error("这条排队指令已处理或已移除")
-        return sendInternal(sessionId, input.text, emptyList(), queueId)
+        return sendInternal(sessionId, input.text, emptyList(), queueId, emptyList())
     }
 
     private suspend fun sendInternal(sessionId: String, instruction: String, selected: List<Uri>,
-                                     queueId: String?): CompanionReply {
+                                     queueId: String?, transferPhotos: List<Uri>): CompanionReply {
         return sendLock.withLock {
             val agent = requireNotNull(runtime) { "请先配置模型" }
             val pendingTask = decodePendingTask(dao.remoteTaskId(sessionId))
             val selectedImages = selected.filter(::isImageAttachment)
             require(selectedImages.size <= 8) { "一次最多选择 8 张照片" }
+            require(transferPhotos.all { it in selectedImages }) { "待发送的相册照片已不在附件中" }
+            val imagesAsFiles = transferPhotos.isNotEmpty()
             val mnnTextOnly = mnnModel != null && mnnModel?.supportsVision != true
-            val imageUris = if (mnnTextOnly) emptyList() else selectedImages
+            val aliasMatches = RemoteTaskRouting.matchingConnections(instruction, configuredConnections)
+            require(aliasMatches.size <= 1) { "提到了多个 A2A 连接别名，请只指定一个" }
+            val target = aliasMatches.singleOrNull()
+            if (target != null) {
+                require(target.enabled) { "A2A 连接 ${target.name} 已停用" }
+                require(target.id in connections) { "A2A 连接 ${target.name} 暂不可用" }
+            }
+            val requestedRemote = target != null || RemoteTaskRouting.requestsRemoteAgent(instruction)
+            require(!imagesAsFiles || requestedRemote) { "请在指令中指定接收照片的电脑端连接" }
+            val imageUris = if (mnnTextOnly || imagesAsFiles) emptyList() else selectedImages
             require(localModel == null || imageUris.size <= 1) { "当前本机模型每次只能识别一张照片" }
             val otherUris = selected.filterNot { it in imageUris }
             val directVision = imageUris.isNotEmpty() && otherUris.isEmpty() && pendingTask == null
@@ -339,14 +353,6 @@ class CompanionAgent(
                 .containsMatchIn(instruction)
             val remoteRequested = Regex("(?i)(发送|上传|转发|分享|电脑端|远程|桌面|A2A|DSH|send|upload|remote|desktop)")
                 .containsMatchIn(instruction)
-            val aliasMatches = RemoteTaskRouting.matchingConnections(instruction, configuredConnections)
-            require(aliasMatches.size <= 1) { "提到了多个 A2A 连接别名，请只指定一个" }
-            val target = aliasMatches.singleOrNull()
-            if (target != null) {
-                require(target.enabled) { "A2A 连接 ${target.name} 已停用" }
-                require(target.id in connections) { "A2A 连接 ${target.name} 暂不可用" }
-            }
-            val requestedRemote = target != null || RemoteTaskRouting.requestsRemoteAgent(instruction)
             require(!mnnTextOnly || selectedImages.isEmpty() || requestedRemote || remoteRequested) {
                 "当前 MNN 模型包缺少视觉文件；图片问题请切换视觉模型"
             }
@@ -367,7 +373,11 @@ class CompanionAgent(
                 }
             } else emptyList()
             val selectedLabels = selected.mapIndexed { index, uri -> "selected:$index (${attachmentName(uri)})" }
-            activeAttachments = AttachmentTurn(sessionId, selected.toList())
+            val transferIds = transferPhotos.mapTo(mutableSetOf()) { uri ->
+                "selected:${selected.indexOf(uri)}"
+            }
+            activeAttachments = AttachmentTurn(sessionId, selected.toList(),
+                transferIds.takeIf { it.isNotEmpty() })
             imageOnlyQuestion = pureImageQuestion
             remoteAgentRequested = requestedRemote
             phoneShellRequested = RemoteTaskRouting.requestsPhoneShell(instruction)
@@ -408,6 +418,11 @@ class CompanionAgent(
                         if (mnnTextOnly && selectedImages.isNotEmpty())
                             append("\n\n[This MNN model cannot see image pixels. It may send selected images " +
                                 "to a file-capable desktop skill only when requested.]")
+                        if (imagesAsFiles) append("\n\n[The user selected these gallery photos for remote transfer: " +
+                            transferIds.sorted().joinToString() + ". Their pixels are not in this " +
+                            "model request. For this transfer, pass only these exact IDs in the " +
+                            "chosen A2A skill's files array. Do not read or describe photo contents " +
+                            "unless the user asks for analysis.]")
                     } else if (pendingTask != null) {
                         append("\n\n[A previous desktop task (${pendingTask.taskId}) is awaiting follow-up. " +
                             "If the user is answering it, call the matching Agent Card skill with taskId. " +
@@ -555,11 +570,13 @@ class CompanionAgent(
     }
 
     private fun normalizedSkillFileIds(ids: List<String>): List<String> {
-        val selectedCount = requireNotNull(activeAttachments) { "没有正在处理的会话" }.selected.size
+        val turn = requireNotNull(activeAttachments) { "没有正在处理的会话" }
+        val selectedCount = turn.selected.size
         val normalized = ids.map { A2aFileIds.normalize(it, selectedCount) }
         require(normalized.size in 1..10 && normalized.distinct().size == normalized.size) {
             "请选择 1–10 个不同的文件"
         }
+        A2aFileIds.requireCompleteAlbumTransfer(normalized, turn.allowedTransferIds)
         return normalized
     }
 

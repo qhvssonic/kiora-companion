@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.Manifest
 import android.content.ClipData
+import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -81,6 +82,7 @@ class MainActivity : Activity() {
     private lateinit var drawerList: LinearLayout
     private lateinit var drawerSearch: EditText
     private val selectedUris = mutableListOf<Uri>()
+    private val albumTransferUris = mutableSetOf<Uri>()
     private val capturedFiles = mutableMapOf<Uri, File>()
     private var pendingCaptureFile: File? = null
     private var streamRow: LinearLayout? = null
@@ -122,6 +124,8 @@ class MainActivity : Activity() {
         pendingCaptureFile = savedInstanceState?.getString("pending_capture_path")?.let(::File)
         savedInstanceState?.getStringArrayList("selected_uris")
             ?.mapTo(selectedUris, Uri::parse)
+        savedInstanceState?.getStringArrayList("album_transfer_uris")
+            ?.mapTo(albumTransferUris, Uri::parse)
         savedInstanceState?.getStringArrayList("captured_paths")?.forEach { path ->
             val file = File(path)
             if (file.isFile) {
@@ -180,6 +184,7 @@ class MainActivity : Activity() {
     override fun onSaveInstanceState(outState: Bundle) {
         pendingCaptureFile?.let { outState.putString("pending_capture_path", it.absolutePath) }
         outState.putStringArrayList("selected_uris", ArrayList(selectedUris.map(Uri::toString)))
+        outState.putStringArrayList("album_transfer_uris", ArrayList(albumTransferUris.map(Uri::toString)))
         outState.putStringArrayList("captured_paths", ArrayList(capturedFiles.values.map(File::getAbsolutePath)))
         outState.putString("composer_draft", composer.text.toString())
         outState.putBoolean("queue_expanded", queueExpanded)
@@ -495,6 +500,7 @@ class MainActivity : Activity() {
         }, LinearLayout.LayoutParams(-1, dp(48)))
         addView(suggestion("扫描纸质文档") { scanDocument() })
         addView(suggestion("分析一张照片") { pickPhotos() })
+        addView(suggestion("搜索本地相册") { prepareAlbumSearch() })
         addView(suggestion("选择文件") { pickFiles() })
     }
 
@@ -630,6 +636,24 @@ class MainActivity : Activity() {
 
     private data class LiveTool(val messageId: Long, var trace: ToolTrace, val header: TextView)
 
+    private data class ToolLineViews(
+        val details: TextView,
+        val gallery: LinearLayout,
+        val previewRow: LinearLayout,
+        val stack: FrameLayout,
+        val expand: TextView,
+        val expandedGallery: HorizontalScrollView,
+        val photos: LinearLayout,
+        val collapse: TextView,
+        val selectionBar: LinearLayout,
+        val selectionLabel: TextView,
+        val sendPhotos: TextView,
+        val selectedPhotoIds: MutableSet<Long> = mutableSetOf(),
+        val selectionChips: MutableMap<Long, TextView> = mutableMapOf(),
+        var candidates: List<ToolTrace.AlbumPhoto> = emptyList(),
+        var renderedResult: String? = null,
+    )
+
     private fun addToolLine(stored: String, restored: Boolean = false): TextView {
         emptyState.visibility = View.GONE
         val trace = ToolTrace.fromStoredText(stored)
@@ -658,7 +682,78 @@ class MainActivity : Activity() {
         }
         row.addView(header, LinearLayout.LayoutParams(-1, -2))
         row.addView(details, LinearLayout.LayoutParams(-1, -2))
-        header.tag = details
+        val gallery = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+            setPadding(0, dp(3), 0, dp(5))
+        }
+        val previewRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        val stack = FrameLayout(this).apply {
+            clipChildren = false
+            clipToPadding = false
+        }
+        previewRow.addView(stack, LinearLayout.LayoutParams(dp(286), dp(214)))
+        val expand = TextView(this).apply {
+            textSize = 14f
+            setTextColor(INK)
+            gravity = Gravity.CENTER
+            setPadding(dp(14), 0, dp(14), 0)
+            background = rounded(0xF5FFFFFF.toInt(), 18)
+            visibility = View.GONE
+        }
+        gallery.addView(previewRow, LinearLayout.LayoutParams(-1, -2))
+        val galleryPhotos = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val expandedGallery = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            visibility = View.GONE
+            addView(galleryPhotos, ViewGroup.LayoutParams(-2, -2))
+        }
+        gallery.addView(expandedGallery, LinearLayout.LayoutParams(-1, -2))
+        val collapse = TextView(this).apply {
+            text = "收起照片  ⌃"
+            textSize = 13f
+            setTextColor(MUTED)
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(12), 0, dp(5))
+            visibility = View.GONE
+        }
+        gallery.addView(collapse, LinearLayout.LayoutParams(-1, dp(42)))
+        val selectionBar = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(2), dp(5), dp(2), dp(4))
+        }
+        val selectionLabel = TextView(this).apply {
+            textSize = 13f
+            setTextColor(MUTED)
+        }
+        selectionBar.addView(selectionLabel, LinearLayout.LayoutParams(0, -2, 1f))
+        val sendPhotos = TextView(this).apply {
+            textSize = 13f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            setPadding(dp(15), 0, dp(15), 0)
+            background = rounded(INK, 18)
+        }
+        selectionBar.addView(sendPhotos, LinearLayout.LayoutParams(-2, dp(36)))
+        gallery.addView(selectionBar, LinearLayout.LayoutParams(-1, dp(48)))
+        row.addView(gallery, LinearLayout.LayoutParams(-1, -2))
+        val views = ToolLineViews(details, gallery, previewRow, stack, expand,
+            expandedGallery, galleryPhotos, collapse, selectionBar, selectionLabel, sendPhotos)
+        expand.setOnClickListener { setAlbumExpanded(views, true) }
+        collapse.setOnClickListener { setAlbumExpanded(views, false) }
+        sendPhotos.setOnClickListener {
+            val chosen = if (views.candidates.size == 1) views.candidates
+                else views.candidates.filter { it.id in views.selectedPhotoIds }
+            if (chosen.isEmpty()) {
+                status.text = "请先勾选要发送的照片"
+                return@setOnClickListener
+            }
+            chooseAlbumTransferTarget(chosen)
+        }
+        header.tag = views
         if (trace == null) {
             header.text = "⚠ 无法显示工具记录  ⌄"
             details.text = stored.take(8_000)
@@ -668,7 +763,8 @@ class MainActivity : Activity() {
     }
 
     private fun updateToolLine(header: TextView, trace: ToolTrace, restored: Boolean = false) {
-        val details = header.tag as TextView
+        val views = header.tag as ToolLineViews
+        val details = views.details
         val stateText = when (trace.state) {
             ToolTrace.State.RUNNING -> if (restored) "调用中断" else "正在调用"
             ToolTrace.State.SUCCEEDED -> "已调用"
@@ -695,6 +791,233 @@ class MainActivity : Activity() {
                 else -> trace.displayResult().take(16_000)
             })
         }
+        renderAlbumPhotos(views, trace)
+    }
+
+    private fun renderAlbumPhotos(views: ToolLineViews, trace: ToolTrace) {
+        if (trace.name != AlbumSearchTool.NAME || trace.state != ToolTrace.State.SUCCEEDED) {
+            views.gallery.visibility = View.GONE
+            return
+        }
+        if (views.renderedResult == trace.result) return
+        views.renderedResult = trace.result
+        views.photos.removeAllViews()
+        views.stack.removeAllViews()
+        views.selectedPhotoIds.clear()
+        views.selectionChips.clear()
+        val candidates = trace.albumPhotos()
+        views.candidates = candidates
+        val multiple = candidates.size > 1
+        val stackWidth = minOf(dp(286), resources.displayMetrics.widthPixels - dp(48))
+        views.stack.layoutParams = (views.stack.layoutParams as LinearLayout.LayoutParams).apply {
+            width = stackWidth
+            height = dp(if (multiple) 214 else 190)
+        }
+        views.expand.text = "展开 ${candidates.size} 张"
+        views.expand.visibility = if (multiple) View.VISIBLE else View.GONE
+        views.stack.setOnClickListener(if (multiple) View.OnClickListener { setAlbumExpanded(views, true) }
+            else candidates.firstOrNull()?.let { photo ->
+                val collection = if (android.os.Build.VERSION.SDK_INT >= 29)
+                    MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+                else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                val uri = ContentUris.withAppendedId(collection, photo.id)
+                View.OnClickListener { showImagePreview(uri) }
+            })
+        views.stack.contentDescription = if (multiple) "展开 ${candidates.size} 张候选照片"
+            else "查看候选照片"
+        val collection = if (android.os.Build.VERSION.SDK_INT >= 29)
+            MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        val imageTargets = mutableMapOf<Long, MutableList<ImageView>>()
+        candidates.forEachIndexed { index, photo ->
+            val uri = ContentUris.withAppendedId(collection, photo.id)
+            val toggleSelection = {
+                if (!views.selectedPhotoIds.add(photo.id)) views.selectedPhotoIds.remove(photo.id)
+                updateAlbumSelection(views)
+            }
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                contentDescription = if (multiple) "选择第 ${index + 1} 张候选照片：${photo.name}"
+                    else "查看候选照片：${photo.name}"
+                setOnClickListener { if (multiple) toggleSelection() else showImagePreview(uri) }
+            }
+            views.photos.addView(card, LinearLayout.LayoutParams(dp(110), -2).apply {
+                rightMargin = dp(8)
+            })
+            val tile = FrameLayout(this)
+            card.addView(tile, LinearLayout.LayoutParams(-1, dp(110)))
+            val image = ImageView(this).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                background = rounded(USER_BUBBLE, 12)
+                clipToOutline = true
+                setOnClickListener { if (multiple) toggleSelection() else showImagePreview(uri) }
+            }
+            tile.addView(image, FrameLayout.LayoutParams(-1, -1))
+            if (multiple) {
+                val selector = TextView(this).apply {
+                    text = "○"
+                    textSize = 21f
+                    gravity = Gravity.CENTER
+                    setTextColor(INK)
+                    background = rounded(0xEEFFFFFF.toInt(), 18)
+                    contentDescription = "选择第 ${index + 1} 张照片"
+                    setOnClickListener { toggleSelection() }
+                }
+                tile.addView(selector, FrameLayout.LayoutParams(dp(42), dp(42),
+                    Gravity.TOP or Gravity.RIGHT).apply { topMargin = dp(5); rightMargin = dp(5) })
+                views.selectionChips[photo.id] = selector
+            }
+            imageTargets.getOrPut(photo.id) { mutableListOf() }.add(image)
+            val caption = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+            card.addView(caption, LinearLayout.LayoutParams(-1, dp(31)))
+            caption.addView(TextView(this).apply {
+                text = photo.name.ifBlank { "照片 ${index + 1}" }
+                textSize = 12f
+                setTextColor(MUTED)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                setPadding(dp(2), dp(5), dp(2), 0)
+                setOnClickListener { if (multiple) toggleSelection() else showImagePreview(uri) }
+            }, LinearLayout.LayoutParams(0, -1, 1f))
+            if (multiple) caption.addView(TextView(this).apply {
+                text = "预览"
+                textSize = 12f
+                setTextColor(INK)
+                gravity = Gravity.CENTER
+                contentDescription = "预览第 ${index + 1} 张照片"
+                setOnClickListener { showImagePreview(uri) }
+            }, LinearLayout.LayoutParams(dp(38), -1))
+        }
+        candidates.indices.reversed().forEach { index ->
+            val photo = candidates[index]
+            val image = ImageView(this).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                background = rounded(USER_BUBBLE, 14)
+                clipToOutline = true
+            }
+            val layer = FrameLayout(this).apply {
+                background = rounded(Color.WHITE, 16, STROKE)
+                clipToOutline = true
+                setPadding(dp(2), dp(2), dp(2), dp(2))
+                addView(image, FrameLayout.LayoutParams(-1, -1))
+                rotation = when (index) {
+                    1 -> 3f
+                    2 -> 6f
+                    else -> 0f
+                }
+            }
+            views.stack.addView(layer, FrameLayout.LayoutParams(
+                stackWidth - dp(if (multiple) 56 else 0), dp(190)).apply {
+                leftMargin = dp(if (multiple) index * 23 else 0)
+                topMargin = dp(if (multiple) 12 else 0)
+            })
+            imageTargets.getOrPut(photo.id) { mutableListOf() }.add(image)
+        }
+        if (multiple) views.stack.addView(views.expand, FrameLayout.LayoutParams(-2, dp(36),
+            Gravity.RIGHT or Gravity.BOTTOM).apply {
+            rightMargin = dp(68)
+            bottomMargin = dp(24)
+        })
+        candidates.forEach { photo ->
+            val uri = ContentUris.withAppendedId(collection, photo.id)
+            val targets = imageTargets.getValue(photo.id)
+            scope.launch {
+                val bitmap = withContext(Dispatchers.IO) {
+                    MessagePreviews(this@MainActivity).decode(uri, 240)
+                }
+                if (views.gallery.isAttachedToWindow && views.renderedResult == trace.result)
+                    targets.forEach { it.setImageBitmap(bitmap) }
+                else bitmap?.recycle()
+            }
+        }
+        setAlbumExpanded(views, false)
+        updateAlbumSelection(views)
+        views.gallery.visibility = if (candidates.isNotEmpty()) View.VISIBLE else View.GONE
+    }
+
+    private fun setAlbumExpanded(views: ToolLineViews, expanded: Boolean) {
+        views.previewRow.visibility = if (expanded) View.GONE else View.VISIBLE
+        views.expandedGallery.visibility = if (expanded) View.VISIBLE else View.GONE
+        views.collapse.visibility = if (expanded) View.VISIBLE else View.GONE
+        views.selectionBar.visibility = if (expanded || views.candidates.size == 1 ||
+            views.selectedPhotoIds.isNotEmpty()) View.VISIBLE else View.GONE
+    }
+
+    private fun updateAlbumSelection(views: ToolLineViews) {
+        val single = views.candidates.size == 1
+        views.selectionLabel.text = if (single) "在手机相册中" else "已选 ${views.selectedPhotoIds.size} 张"
+        views.sendPhotos.text = if (single) "发送到电脑" else "发送所选到电脑"
+        views.selectionChips.forEach { (id, chip) ->
+            val selected = id in views.selectedPhotoIds
+            chip.text = if (selected) "✓" else "○"
+            chip.setTextColor(if (selected) Color.WHITE else INK)
+            chip.background = rounded(if (selected) INK else 0xEEFFFFFF.toInt(), 18)
+            chip.contentDescription = if (selected) "取消选择照片" else "选择照片"
+        }
+        views.selectionBar.visibility = if (views.expandedGallery.visibility == View.VISIBLE || single ||
+            views.selectedPhotoIds.isNotEmpty()) View.VISIBLE else View.GONE
+    }
+
+    private fun chooseAlbumTransferTarget(photos: List<ToolTrace.AlbumPhoto>) {
+        if (busy || queueItems.isNotEmpty()) {
+            status.text = "请等待当前任务和队列结束后发送照片"
+            return
+        }
+        val targets = a2aConnections.list().filter { it.enabled && it.alias.isNotBlank() }
+        if (targets.isEmpty()) {
+            status.text = "请先在连接设置中启用电脑端 A2A，并设置触发别名"
+            return
+        }
+        if (targets.size == 1) {
+            stageAlbumTransfer(photos, targets.single())
+            return
+        }
+        SettingsSheet.showOptions(this, "选择接收电脑", "照片会先加入消息附件，确认后再发送",
+            targets.map { SettingsSheet.Option(it.name, "触发别名 ${it.alias}") }) { index ->
+            stageAlbumTransfer(photos, targets[index])
+        }
+    }
+
+    private fun stageAlbumTransfer(photos: List<ToolTrace.AlbumPhoto>, target: A2aConnectionConfig) {
+        val draft = composer.text.toString().trim()
+        val otherTargets = a2aConnections.list().filter {
+            it.id != target.id && it.alias.isNotBlank() &&
+                RemoteTaskRouting.matchingConnections(draft, listOf(it)).isNotEmpty()
+        }
+        if (otherTargets.isNotEmpty()) {
+            status.text = "草稿已提到另一个 A2A 连接，请先修改草稿再选择照片"
+            return
+        }
+        val collection = if (android.os.Build.VERSION.SDK_INT >= 29)
+            MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        val uris = photos.map { ContentUris.withAppendedId(collection, it.id) }
+        val combined = (selectedUris + uris).distinct()
+        if (combined.count { MessagePreviews(this).isImage(it) } > 8) {
+            status.text = "一次最多发送 8 张照片，请先移除部分附件"
+            return
+        }
+        val totalBytes = combined.sumOf { uri ->
+            runCatching {
+                contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) cursor.getLong(0) else 0L
+                } ?: 0L
+            }.getOrDefault(0L)
+        }
+        if (totalBytes > 10L * 1024 * 1024) {
+            status.text = "所选附件超过 A2A 的 10 MB 上限，请减少照片后重试"
+            return
+        }
+        selectedUris.clear()
+        selectedUris.addAll(combined)
+        albumTransferUris.addAll(uris)
+        showAttachments()
+        val instruction = "通过 ${target.alias} 把所选照片保存到电脑桌面。"
+        if (draft.isBlank()) composer.setText(instruction)
+        else if (!draft.contains(instruction))
+            composer.append("\n$instruction")
+        composer.setSelection(composer.length())
+        status.text = "已加入 ${photos.size} 张照片；确认指令后点击发送"
     }
 
     private suspend fun showToolEvent(event: AgentEvent) {
@@ -1099,10 +1422,12 @@ class MainActivity : Activity() {
 
     private fun performSend(instruction: String, queueId: String? = null) {
         val files = if (queueId == null) selectedUris.toList() else emptyList()
+        val transferFiles = files.filter { it in albumTransferUris }
         val id = currentConversationId ?: return
         liveTools.clear()
         if (queueId == null) {
             selectedUris.clear()
+            albumTransferUris.clear()
             showAttachments()
             composer.text.clear()
         }
@@ -1129,7 +1454,7 @@ class MainActivity : Activity() {
                     conversations.append(id, user)
                 }
                 status.text = "正在处理…"
-                val reply = if (queueId == null) agent.send(id, instruction, files)
+                val reply = if (queueId == null) agent.send(id, instruction, files, transferFiles)
                     else agent.sendQueued(id, queueId)
                 if (reply.attention != null || !answerShownInRun) {
                     val line = ChatLine("assistant", reply.text)
@@ -1152,6 +1477,7 @@ class MainActivity : Activity() {
                 clearStream()
                 if (queueId == null) {
                     selectedUris.addAll(files)
+                    albumTransferUris.addAll(transferFiles)
                     showAttachments()
                     if (composer.text.isBlank()) composer.setText(instruction)
                 }
@@ -1446,6 +1772,7 @@ class MainActivity : Activity() {
     private fun removeSelectedAttachment(uri: Uri) {
         if (busy) { status.text = "请等待当前回复完成"; return }
         selectedUris.remove(uri)
+        albumTransferUris.remove(uri)
         capturedFiles.remove(uri)?.delete()
         showAttachments()
     }
@@ -1540,6 +1867,14 @@ class MainActivity : Activity() {
         panel.addView(View(this).apply { setBackgroundColor(STROKE) },
             LinearLayout.LayoutParams(-1, dp(1)).apply { topMargin = dp(10) })
         panel.addView(TextView(this).apply {
+            text = "◌   搜索本地相册"
+            textSize = 15f
+            setTextColor(INK)
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), 0, 0, 0)
+            setOnClickListener { hideHistory(); prepareAlbumSearch() }
+        }, LinearLayout.LayoutParams(-1, dp(52)))
+        panel.addView(TextView(this).apply {
             text = "⚙   模型与连接设置"
             textSize = 15f
             setTextColor(INK)
@@ -1621,6 +1956,7 @@ class MainActivity : Activity() {
             currentConversationId = conversations.newConversation()
             clearCapturedFiles()
             selectedUris.clear()
+            albumTransferUris.clear()
             showAttachments()
             showConversation()
             status.text = "新会话"
@@ -1632,6 +1968,22 @@ class MainActivity : Activity() {
         startActivityForResult(Intent(this, SettingsActivity::class.java).apply {
             putExtra("focus_voice", voice)
         }, SETTINGS)
+    }
+
+    private fun prepareAlbumSearch() {
+        val prompt = "搜索相册中的图片："
+        val draft = composer.text.toString()
+        if (draft.isBlank()) composer.setText(prompt)
+        else if (!draft.contains(prompt)) composer.append(if (draft.endsWith('\n')) prompt else "\n$prompt")
+        composer.setSelection(composer.length())
+        composer.requestFocus()
+        composer.post {
+            (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
+                .showSoftInput(composer, InputMethodManager.SHOW_IMPLICIT)
+        }
+        if (!AlbumSearchService.isReady(this)) {
+            status.text = "请先在设置中导入相册模型、授权照片并建立索引"
+        }
     }
 
     private fun chooseHeaderModel() {
@@ -1704,6 +2056,10 @@ class MainActivity : Activity() {
                     updateModelIndicator()
                 } catch (cancelled: CancellationException) {
                     throw cancelled
+                } catch (error: LinkageError) {
+                    if (request == connectionRequest) {
+                        status.text = "本机模型运行库不兼容：${error.message ?: "请更新应用"}"
+                    }
                 } catch (error: Exception) {
                     if (request == connectionRequest) {
                         status.text = "连接失败：${error.message ?: "请检查地址"}"

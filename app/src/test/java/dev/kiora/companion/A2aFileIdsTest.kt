@@ -1,6 +1,7 @@
 package dev.kiora.companion
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class A2aFileIdsTest {
@@ -16,5 +17,13 @@ class A2aFileIdsTest {
         assertEquals("workspace:0", A2aFileIds.normalize("workspace:0", 1))
         assertEquals("workspace:poem.txt", A2aFileIds.normalize("workspace:poem.txt", 1))
         assertEquals("authorized:folder_1/0", A2aFileIds.normalize("authorized:folder_1/0", 1))
+    }
+
+    @Test fun albumTransferCannotSilentlyDropSelectedPhoto() {
+        val selected = setOf("selected:0", "selected:1")
+        assertThrows(IllegalArgumentException::class.java) {
+            A2aFileIds.requireCompleteAlbumTransfer(listOf("selected:0"), selected)
+        }
+        A2aFileIds.requireCompleteAlbumTransfer(listOf("selected:1", "selected:0"), selected)
     }
 }

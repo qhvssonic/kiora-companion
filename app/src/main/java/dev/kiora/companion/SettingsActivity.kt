@@ -79,6 +79,8 @@ class SettingsActivity : Activity() {
     private lateinit var shellValue: TextView
     private lateinit var foldersValue: TextView
     private lateinit var galleryValue: TextView
+    private lateinit var albumModelValue: TextView
+    private lateinit var albumIndexValue: TextView
     private lateinit var voiceModelValue: TextView
     private lateinit var voiceTokensValue: TextView
     private val voiceFiles by lazy { VoiceModelFiles(this) }
@@ -207,7 +209,11 @@ class SettingsActivity : Activity() {
         content.addView(note("Android 不允许授权 Download 或手机存储的根目录。要使用下载的文件，请在 Download 中新建子文件夹，把文件移入后授权该子文件夹。"))
         galleryValue = selectionRow(content, "相册访问") { chooseGalleryAccess() }
         content.addView(note("目录由你逐个选择；相册获得 Android 完整照片权限后可直接浏览。聊天中手动选中的照片也可直接识别。"))
+        albumModelValue = selectionRow(content, "相册检索模型") { openAlbumSetup() }
+        albumIndexValue = selectionRow(content, "本地相册索引") { openAlbumSetup() }
+        content.addView(note("导入 EmbeddingGemma 2 后可为已授权照片建立本地索引，供相册搜索和智能体工具使用。"))
         refreshStorageGrants()
+        refreshAlbumSettings()
 
         section(content, "端侧语音识别")
         voiceModelValue = selectionRow(content, "SenseVoice Small int8 模型") { chooseVoiceFile(true) }
@@ -225,6 +231,9 @@ class SettingsActivity : Activity() {
         refreshShellEnabled()
         if (intent.getBooleanExtra("focus_voice", false)) {
             scroll.post { scroll.smoothScrollTo(0, (voiceModelValue.parent as View).top - dp(24)) }
+        }
+        if (intent.getBooleanExtra("focus_album", false)) {
+            scroll.post { scroll.smoothScrollTo(0, (albumModelValue.parent as View).top - dp(24)) }
         }
     }
 
@@ -731,9 +740,28 @@ class SettingsActivity : Activity() {
         }
     }
 
+    private fun openAlbumSetup() {
+        startActivity(Intent(this, AlbumIndexActivity::class.java))
+    }
+
+    private fun refreshAlbumSettings() {
+        val albumPrefs = getSharedPreferences("album_search", MODE_PRIVATE)
+        val model = albumPrefs.getString("path", null)?.let(::File)?.takeIf(File::isFile)
+        albumModelValue.text = if (model == null) "未导入 · 点按配置  ›"
+            else "已导入 · ${model.length() / 1_000_000} MB  ›"
+        val sha = albumPrefs.getString("sha256", null)
+        val count = if (model != null && sha != null) {
+            val store = AlbumIndexStore(this)
+            try { store.count("embeddinggemma2-440m:$sha:photo-v1") }
+            finally { store.close() }
+        } else 0
+        albumIndexValue.text = "$count 张照片已索引  ›"
+    }
+
     override fun onResume() {
         super.onResume()
         if (::galleryValue.isInitialized) refreshStorageGrants()
+        if (::albumModelValue.isInitialized) refreshAlbumSettings()
         a2aVisible = true
         if (::a2aList.isInitialized) startA2aMonitor()
     }

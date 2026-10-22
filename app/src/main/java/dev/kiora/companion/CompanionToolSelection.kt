@@ -5,6 +5,7 @@ internal data class CompanionToolSelection(
     val shellEnabled: Boolean,
     val hasFolders: Boolean,
     val hasGallery: Boolean,
+    val hasAlbumSearch: Boolean = false,
     val remoteTools: Set<String>,
     val imageOnlyQuestion: Boolean = false,
     val remoteAgentRequested: Boolean = false,
@@ -14,6 +15,7 @@ internal data class CompanionToolSelection(
         addAll(setOf("read", "write", "edit", "get_local_time"))
         if (shellEnabled && (!remoteAgentRequested || phoneShellRequested)) add("shell")
         if (hasFolders || hasGallery) add(PhoneResourceTools.BROWSE)
+        if (hasAlbumSearch) add(AlbumSearchTool.NAME)
         if (hasFolders) add(PhoneResourceTools.MANAGE)
         addAll(remoteTools)
     }.intersect(available)

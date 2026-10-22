@@ -13,7 +13,7 @@ enum class ApprovalMode(val key: String, val title: String, val description: Str
 
 /** Only host-owned, read-only tools confined to the app workspace or Android grants belong here. */
 internal fun isLowRiskTool(name: String): Boolean = name in setOf(
-    "get_local_time", "read", PhoneResourceTools.BROWSE,
+    "get_local_time", "read", PhoneResourceTools.BROWSE, AlbumSearchTool.NAME,
     "list_authorized_folders", "list_authorized_photos", "list_authorized_files",
     "list_gallery_photos", "describe_gallery_photo",
     "search_authorized_files", "inspect_authorized_file", "read_authorized_text",

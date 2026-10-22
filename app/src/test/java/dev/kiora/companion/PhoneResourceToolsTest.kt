@@ -72,6 +72,11 @@ class PhoneResourceToolsTest {
         assertEquals("0", calls.single().arguments["index"]?.jsonPrimitive?.content)
     }
 
+    @Test fun readAcceptsNumericGalleryPathFromConversation() = runBlocking {
+        tools().getValue("read").executeResult(args("path" to "gallery:42"))
+        assertEquals("gallery_42", calls.single().arguments["photoId"]?.jsonPrimitive?.content)
+    }
+
     @Test fun browseAndManageDispatchToGrantBoundTools() = runBlocking {
         val exposed = tools()
         assertEquals(setOf("read", PhoneResourceTools.BROWSE, PhoneResourceTools.MANAGE), exposed.keys)

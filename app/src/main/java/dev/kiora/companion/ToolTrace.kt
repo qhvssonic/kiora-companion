@@ -19,6 +19,22 @@ data class ToolTrace(
 ) {
     enum class State { RUNNING, SUCCEEDED, FAILED, INPUT_REQUIRED, AUTH_REQUIRED }
 
+    data class AlbumPhoto(val id: Long, val name: String)
+
+    fun albumPhotos(): List<AlbumPhoto> {
+        if (name != AlbumSearchTool.NAME || state != State.SUCCEEDED) return emptyList()
+        return runCatching {
+            Json.parseToJsonElement(result).jsonObject.getValue("items").jsonArray
+                .mapNotNull { item ->
+                    val photo = item.jsonObject
+                    val rawId = photo["photoId"]?.jsonPrimitive?.content.orEmpty()
+                    val id = rawId.removePrefix("gallery_").toLongOrNull()?.takeIf { it >= 0 }
+                    if (!rawId.startsWith("gallery_") || id == null) null
+                    else AlbumPhoto(id, photo["name"]?.jsonPrimitive?.content.orEmpty())
+                }.take(3)
+        }.getOrDefault(emptyList())
+    }
+
     val label: String get() = when (name) {
         "get_local_time" -> "读取本机时间"
         "read" -> "读取文件或照片"
@@ -26,6 +42,7 @@ data class ToolTrace(
         "edit" -> "编辑工作区文件"
         "shell" -> "运行手机命令"
         PhoneResourceTools.BROWSE -> "浏览手机文件与相册"
+        AlbumSearchTool.NAME -> "搜索本地相册"
         PhoneResourceTools.MANAGE -> when (runCatching {
             Json.parseToJsonElement(arguments).jsonObject["action"]?.jsonPrimitive?.content
         }.getOrNull()) {
@@ -65,6 +82,12 @@ data class ToolTrace(
     }
 
     fun displayResult(): String {
+        if (name == AlbumSearchTool.NAME && state == State.SUCCEEDED) {
+            val count = albumPhotos().size
+            return if (count == 0) "没有可展示的候选照片，请检查相册索引与授权"
+                else if (count == 1) "已展示 1 张排序候选照片；点击图片可放大查看"
+                else "已展示 $count 张排序候选照片；展开后点击图片可放大查看"
+        }
         val listsFiles = name == "list_authorized_files" ||
             (name == PhoneResourceTools.BROWSE && runCatching {
                 Json.parseToJsonElement(arguments).jsonObject["action"]?.jsonPrimitive?.content == "files"
