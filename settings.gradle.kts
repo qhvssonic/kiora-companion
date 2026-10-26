@@ -17,7 +17,11 @@ dependencyResolutionManagement {
     repositories {
         mavenLocal()
         providers.gradleProperty("kioraLocalRepo").orNull?.let { localRepo ->
-            maven { url = uri(localRepo) }
+            maven {
+                url = uri(localRepo)
+                // This repository supplies native dependencies, not stale SDK snapshots.
+                content { excludeGroup("dev.kiora") }
+            }
         }
         google()
         mavenCentral()

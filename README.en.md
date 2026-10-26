@@ -2,7 +2,7 @@
 
 **English** | [简体中文](README.md)
 
-Kiora Companion is an Android host application built on the [Kiora SDK](https://github.com/qhvssonic/kiora). The current app version is **0.1.91** and uses SDK **`0.3.0-SNAPSHOT`**. It brings on-device models, document scanning, gallery search, local tools, authorization, and A2A collaboration into one conversation. The demonstration uses a computer-hosted DSH agent, but A2A peers are not limited to computers.
+Kiora Companion is an Android host application built on the [Kiora SDK](https://github.com/qhvssonic/kiora). The current app version is **0.1.100** and uses SDK **`0.3.0-SNAPSHOT`**. It brings on-device models, document scanning, gallery search, local tools, authorization, and A2A collaboration into one conversation. The demonstration uses a computer-hosted DSH agent, but A2A peers are not limited to computers.
 
 The code is licensed under [Apache-2.0](LICENSE). Model weights, native AARs, and the DSH plugin have separate upstream licenses.
 
@@ -14,6 +14,7 @@ The code is licensed under [Apache-2.0](LICENSE). Model weights, native AARs, an
 - **Delegate to other agents:** configure multiple A2A connections by Agent Card URL or QR code. Each connection may have a unique trigger alias, enabled skills, its own Bearer Token, and a live connection status. The agent can send text and authorized small file attachments to a reachable peer.
 - **Keep work continuous:** persist conversations, SDK session branches, tool traces, A2A `contextId`, and unfinished remote `taskId` in Room. Pure-text messages submitted while a run is active become queued follow-ups.
 - **Use local speech input:** import SenseVoice Small int8 files and transcribe a short recording on-device. The transcript goes into the composer for review before it is sent.
+- **Read replies aloud offline:** import the pinned MeloTTS directory (FP32 recommended; int8 also supported) in Settings, tap the speaker icon on an assistant reply; reading aloud is a manual action and is not exposed as an agent tool. Playback can be stopped; audio is neither saved nor sent to an A2A peer. FP32 synthesis has been measured on the V2509A; broader device and audio quality validation is pending.
 
 The settings page separates on-device providers from API providers. The chat UI includes conversation search, a model switcher, an attachment composer, tool-call details, Markdown rendering, and image preview with pinch zoom. These are Companion features built on the SDK, not features supplied automatically by `AgentRuntime`.
 
@@ -25,7 +26,7 @@ The gallery model is imported under **Settings → Phone files and gallery**. It
 
 The chat model's vision capacity is independent of A2A attachment count. The current LiteRT integration passes one image per turn; MNN vision models and compatible online models can receive up to eight if their model packages and endpoints support them. A selected gallery photo may be transmitted as an A2A file without using a slot in the chat model's image input. The current Gemma 4 E2B test package has a default 4,096-token context. The optional context management limit in settings protects Kiora's input budget; it does not enlarge the model's actual context window. Earlier turns can be summarized through the SDK while original session records remain stored.
 
-OCR and speech are separate on-device adapters. PP-OCRv6 requires a locally prepared Paddle Android AAR and ONNX model files. SenseVoice Small int8 requires separately imported `model.int8.onnx` and `tokens.txt`. These weights are not part of the APK. See the SDK's [OCR guide](https://github.com/qhvssonic/kiora/blob/main/docs/document-ocr.md) and [speech guide](https://github.com/qhvssonic/kiora/blob/main/docs/speech-recognition.md) (currently in Chinese).
+OCR and speech are separate on-device adapters. PP-OCRv6 requires a locally prepared Paddle Android AAR and ONNX model files. SenseVoice Small int8 requires separately imported `model.int8.onnx` and `tokens.txt`. MeloTTS uses a separate, pinned FP32 or int8 model directory prepared by the SDK's `scripts/prepare_melotts.py`; Companion checks the hashes during import. Weights are not part of the APK. See the SDK's [OCR guide](https://github.com/qhvssonic/kiora/blob/main/docs/document-ocr.md), [recognition guide](https://github.com/qhvssonic/kiora/blob/main/docs/speech-recognition.md), and [synthesis guide](https://github.com/qhvssonic/kiora/blob/main/docs/speech-synthesis.md) (currently in Chinese).
 
 The models used by the project are listed in the [ModelScope bundle](https://www.modelscope.cn/models/vqhvqh/kiora_model_bundles). Check each model's own license and compatibility requirements.
 
@@ -76,6 +77,8 @@ cd ..\kiora
 ```
 
 Then build the app from its repository:
+
+All `dev.kiora` SDK modules resolve from `mavenLocal()`. The optional `kioraLocalRepo` supplies third-party native dependencies and excludes old SDK snapshots, so it cannot silently replace a current LiteRT adapter with one compiled against an incompatible runtime.
 
 ```powershell
 cd ..\kiora-companion

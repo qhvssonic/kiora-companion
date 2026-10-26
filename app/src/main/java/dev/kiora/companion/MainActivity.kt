@@ -9,9 +9,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
@@ -31,6 +33,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.ImageButton
 import androidx.core.content.FileProvider
 import dev.kiora.core.AgentEvent
 import dev.kiora.core.AgentMessage
@@ -38,6 +41,7 @@ import dev.kiora.core.QueuedUserInput
 import dev.kiora.core.ToolAuthorization
 import dev.kiora.core.ToolAuthorizationRequest
 import dev.kiora.speech.Pcm16Audio
+import dev.kiora.speech.SpeechSynthesisRequest
 import dev.kiora.speech.sherpa.SenseVoiceRecognizer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -118,6 +122,17 @@ class MainActivity : Activity() {
     private var voicePending = false
     private var recordingWaveform: RecordingWaveformDrawable? = null
     private val messageWidthInsets = WeakHashMap<TextView, Int>()
+    private lateinit var speechControls: LinearLayout
+    private lateinit var speechLabel: TextView
+    private lateinit var speechStop: ImageButton
+    private var speechJob: Job? = null
+    private val speech by lazy { OfflineSpeechPlayer(this) { text, active ->
+        if (this::speechControls.isInitialized) {
+            speechControls.visibility = if (active || text.isNotBlank()) View.VISIBLE else View.GONE
+            speechLabel.text = text
+            speechStop.visibility = if (active) View.VISIBLE else View.GONE
+        }
+    } }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -165,6 +180,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        speech.stop()
         if (this::voiceButton.isInitialized) {
             recordingWaveform = null
             voiceRecorder.cancel()
@@ -172,6 +188,12 @@ class MainActivity : Activity() {
         scope.cancel()
         CoroutineScope(Dispatchers.IO).launch { runCatching { agent.close() } }
         super.onDestroy()
+    }
+
+    override fun onStop() {
+        speech.stop()
+        speechJob?.cancel()
+        super.onStop()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -272,6 +294,28 @@ class MainActivity : Activity() {
             ellipsize = android.text.TextUtils.TruncateAt.END
         }
         root.addView(status, LinearLayout.LayoutParams(-1, dp(42)))
+
+        speechControls = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(2), 0, 0, 0)
+            visibility = View.GONE
+        }
+        speechLabel = TextView(this).apply {
+            textSize = 14f
+            setTextColor(INK)
+            setPadding(0, 0, dp(8), 0)
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        speechControls.addView(speechLabel, LinearLayout.LayoutParams(0, -2, 1f))
+        speechStop = speechIcon(R.drawable.ic_speech_stop).apply {
+            contentDescription = "停止当前朗读"
+            tooltipText = "停止朗读"
+            setOnClickListener { speech.stop(); speechJob?.cancel() }
+        }
+        speechControls.addView(speechStop, LinearLayout.LayoutParams(dp(48), dp(48)))
+        root.addView(speechControls, LinearLayout.LayoutParams(-1, -2).apply {
+            setMargins(dp(14), 0, dp(14), dp(4))
+        })
 
         val selectedScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
@@ -537,6 +581,8 @@ class MainActivity : Activity() {
     }
 
     private fun showConversation() {
+        speech.stop()
+        speechJob?.cancel()
         val id = currentConversationId ?: return
         val connectionAtLoad = connectionRequest
         val loadingDuringConnection = connecting
@@ -619,7 +665,7 @@ class MainActivity : Activity() {
                 }
             }
         }
-        return TextView(this).apply {
+        val textView = TextView(this).apply {
             textSize = 16f
             setTextColor(INK)
             setTextIsSelectable(true)
@@ -629,7 +675,45 @@ class MainActivity : Activity() {
             bubble.addView(this, LinearLayout.LayoutParams(-2, -2))
             limitMessageWidth(this, if (line.role == "user") 56 else 36)
             if (line.role == "user") text = line.text else markdown.render(this, line.text)
-        }.also { scrollToBottom() }
+        }
+        if (line.role == "assistant") addSpeechAction(bubble, line.text)
+        scrollToBottom()
+        return textView
+    }
+
+    private fun speechIcon(drawable: Int): ImageButton = ImageButton(this).apply {
+        setImageResource(drawable)
+        setPadding(dp(13), dp(13), dp(13), dp(13))
+        scaleType = ImageView.ScaleType.FIT_CENTER
+        backgroundTintList = null
+        background = RippleDrawable(ColorStateList.valueOf(0x14777773), null, rounded(Color.WHITE, 24))
+        elevation = 0f
+    }
+
+    private fun addSpeechAction(parent: LinearLayout, source: String) {
+        if (source.isBlank()) return
+        parent.addView(speechIcon(R.drawable.ic_speech_speaker).apply {
+            contentDescription = "离线朗读这条回复"
+            tooltipText = "朗读"
+            setOnClickListener {
+                if (voicePending || voiceProcessing) {
+                    status.text = "请先结束录音或等待转写完成"
+                } else if (MeloTtsModelFiles(this@MainActivity).current() == null) {
+                    if (!busy) startActivityForResult(Intent(this@MainActivity, SettingsActivity::class.java)
+                        .putExtra("focus_tts", true), SETTINGS)
+                    else status.text = "请先完成任务，再到设置中导入离线朗读模型"
+                } else {
+                    speechJob?.cancel()
+                    speech.stop()
+                    speechJob = scope.launch {
+                        try { speech.speak(SpeechSynthesisRequest(markdown.plainText(source))) }
+                        catch (cancelled: CancellationException) { throw cancelled }
+                        catch (error: Exception) { speechLabel.text = "朗读失败：${error.message}"
+                            speechControls.visibility = View.VISIBLE }
+                    }
+                }
+            }
+        }, LinearLayout.LayoutParams(dp(48), dp(48)).apply { topMargin = dp(2) })
     }
 
     private fun showImagePreview(uri: Uri) {
@@ -1082,6 +1166,7 @@ class MainActivity : Activity() {
                 streamTail?.let { streamContent?.addView(it, LinearLayout.LayoutParams(-2, -2)) }
             }
             renderStreamMarkdown(line.text)
+            streamContent?.let { addSpeechAction(it, line.text) }
             clearStream()
             if (followBottom) scrollToBottom()
         } else addLine(line)
@@ -1343,6 +1428,8 @@ class MainActivity : Activity() {
 
     private fun startVoice() {
         try {
+            speech.stop()
+            speechJob?.cancel()
             voiceRecorder.start(scope)
             voicePending = true
             showRecordingWaveform()

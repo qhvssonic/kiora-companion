@@ -28,7 +28,10 @@ internal class PhoneResourceTools(
     private val read = object : AgentTool {
         override val definition = ToolDefinition(
             "read",
-            "Read a UTF-8 workspace file by relative path, a file selected in this turn as " +
+            "Read an existing file or photo needed for the user's task; this is not a general knowledge lookup. " +
+                "Use a path or resource ID provided by the user, host, or successful tool results. " +
+                "Never derive a filename or directory from a topic or title. " +
+                "Read a UTF-8 workspace file by relative path, a file selected in this turn as " +
                 "selected:<index>, an authorized folder file as authorized:<folderId>/<relativePath>, " +
                 "or a gallery photo as gallery:gallery_<numericId>. " +
                 "Folder IDs come from browse_phone_files; photo IDs come from browse_phone_files " +

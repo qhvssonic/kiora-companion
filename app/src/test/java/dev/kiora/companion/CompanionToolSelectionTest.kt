@@ -9,6 +9,12 @@ class CompanionToolSelectionTest {
     private val remoteTool = "a2a_dsh_delegate_task"
     private val available = setOf("read", "write", "shell", remoteTool)
 
+    @Test fun manualReadAloudIsNotAnAgentTool() {
+        val selected = CompanionToolSelection(shellEnabled = false, hasFolders = false,
+            hasGallery = false, remoteTools = emptySet()).select(available + "speak_text")
+        assertFalse("speak_text" in selected)
+    }
+
     @Test fun indexedAlbumCanBeSearchedWithoutFullGalleryBrowsing() {
         val offered = available + AlbumSearchTool.NAME + PhoneResourceTools.BROWSE
         val selected = CompanionToolSelection(shellEnabled = false, hasFolders = false,

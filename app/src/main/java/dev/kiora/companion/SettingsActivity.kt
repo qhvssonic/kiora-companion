@@ -84,6 +84,8 @@ class SettingsActivity : Activity() {
     private lateinit var voiceModelValue: TextView
     private lateinit var voiceTokensValue: TextView
     private val voiceFiles by lazy { VoiceModelFiles(this) }
+    private lateinit var ttsModelValue: TextView
+    private var importingTts = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -221,6 +223,13 @@ class SettingsActivity : Activity() {
         content.addView(note("导入 sherpa-onnx 版 model.int8.onnx 和同一模型包的 tokens.txt。文件复制到应用私有存储；录音只在本机转写，结果可修改后发送。"))
         refreshVoiceFiles()
 
+        section(content, "离线朗读")
+        ttsModelValue = selectionRow(content, "MeloTTS 中文朗读模型") {
+            if (!importingTts) startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), PICK_TTS_FOLDER)
+        }
+        content.addView(note("选择解压后的完整 MeloTTS 模型目录。推荐 FP32（model.onnx，约 170 MB），也支持 int8。导入后可朗读助手回复，也可要求智能体朗读文字；音频只在本机生成和播放。"))
+        refreshTtsModel()
+
         section(content, "工具授权")
         approvalValue = selectionRow(content, "授权方式") { chooseApprovalMode() }
         approvalNote = note("")
@@ -234,6 +243,9 @@ class SettingsActivity : Activity() {
         }
         if (intent.getBooleanExtra("focus_album", false)) {
             scroll.post { scroll.smoothScrollTo(0, (albumModelValue.parent as View).top - dp(24)) }
+        }
+        if (intent.getBooleanExtra("focus_tts", false)) {
+            scroll.post { scroll.smoothScrollTo(0, (ttsModelValue.parent as View).top - dp(24)) }
         }
     }
 
@@ -701,6 +713,12 @@ class SettingsActivity : Activity() {
             else "导入 tokens.txt  ›"
     }
 
+    private fun refreshTtsModel() {
+        val ttsModel = MeloTtsModelFiles(this).current()
+        ttsModelValue.text = if (ttsModel != null) "已导入 · ${if (ttsModel.modelFileName == "model.onnx") "FP32" else "int8"} · 中文与词典内英文  ›"
+            else "导入解压后的模型目录  ›"
+    }
+
     private fun chooseFolder() {
         val existing = storageGrants.folders()
         SettingsSheet.showOptions(this, "授权目录", "手机文件与相册",
@@ -810,6 +828,23 @@ class SettingsActivity : Activity() {
             return
         }
         if (resultCode != RESULT_OK) return
+        if (requestCode == PICK_TTS_FOLDER) {
+            val uri = data?.data ?: return
+            if (importingTts) return
+            importingTts = true
+            ttsModelValue.text = "正在导入离线朗读模型…"
+            scope.launch {
+                try {
+                    withContext(Dispatchers.IO) { MeloTtsModelFiles(this@SettingsActivity).importTree(uri) }
+                    refreshTtsModel()
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    ttsModelValue.text = "导入失败：${error.message ?: "请检查模型文件和可用空间"}"
+                } finally { importingTts = false }
+            }
+            return
+        }
         if (requestCode == PICK_FOLDER) {
             data?.data?.let { uri ->
                 runCatching { storageGrants.addFolder(uri, data?.flags ?: 0) }
@@ -912,6 +947,7 @@ class SettingsActivity : Activity() {
         const val PICK_VOICE_TOKENS = 2305
         const val REQUEST_CAMERA_QR = 2306
         const val PICK_MNN_FOLDER = 2307
+        const val PICK_TTS_FOLDER = 2308
         const val BG = 0xFFFAFAF8.toInt()
         const val PALE = 0xFFF1F3F0.toInt()
         const val INK = 0xFF20201F.toInt()

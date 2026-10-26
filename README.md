@@ -2,7 +2,7 @@
 
 [English](README.en.md) | **简体中文**
 
-独立的 Android 应用，作为宿主集成 [Kiora SDK](https://github.com/qhvssonic/kiora)。当前应用版本为 0.1.91，依赖 SDK `0.3.0-SNAPSHOT`。它展示移动端智能体的完整流程：选择 LiteRT-LM 或 MNN 本机模型，在手机扫描与整理多页资料、检索相册，再按用户授权通过 A2A 将任务和文件交给其他 Agent；本次演示连接电脑端 DSH。应用也支持兼容在线模型 API，界面提供可搜索的会话侧边栏、顶部模型选择入口和底部附件输入区。
+独立的 Android 应用，作为宿主集成 [Kiora SDK](https://github.com/qhvssonic/kiora)。当前应用版本为 0.1.100，依赖 SDK `0.3.0-SNAPSHOT`。它展示移动端智能体的完整流程：选择 LiteRT-LM 或 MNN 本机模型，在手机扫描与整理多页资料、检索相册，再按用户授权通过 A2A 将任务和文件交给其他 Agent；本次演示连接电脑端 DSH。应用也支持兼容在线模型 API，界面提供可搜索的会话侧边栏、顶部模型选择入口和底部附件输入区。
 
 许可证：[Apache-2.0](LICENSE)。上游模型、Android AAR 和 DSH 插件分别遵循其各自的许可证。
 
@@ -31,6 +31,7 @@ Android 不允许应用直接读取另一个应用的 `Android/data` 目录。�
 - 「选择文件」只列出应用工作区和设置中已授权目录里的文件，不提供任意手机文件选择器；「选择照片」和拍照是独立的用户主动选择入口。纯照片观察问题直接使用随消息附上的视觉输入；要求保存、发送等操作时仍提供相应工具。
 - 扫描文字进入聊天时，工具列表仍由宿主配置、Android 授权和电脑端 Agent Card 决定，不因扫描或附图场景缩减。工作区写入只作用于应用私有工作区，并继续遵循工具授权方式。
 - 输入栏麦克风支持按键录音（最长 30 秒），使用 Kiora SDK 的 `speech-sherpa-onnx` 在本机做 SenseVoice Small int8 最终转写。设置页需分别导入同一 sherpa-onnx 模型包的 `model.int8.onnx` 与 `tokens.txt`；权重只保存在应用私有存储，不进入 APK。转写文字先进入输入框，用户核对或修改后才发送。原始录音不保存到会话。
+- 助手回复可点「朗读」用 MeloTTS 在本机合成并播放，朗读仅由用户点击图标触发，不向智能体注册朗读工具。设置页「离线朗读」需选择完整的中文与词典内英文模型目录（推荐 FP32，也兼容 int8）；应用核对固定模型修订的 SHA-256 后复制到私有存储，模型不进入 APK。朗读可停止，切换会话、开始录音或离开聊天页也会停止。每次朗读完成后释放合成模型，当前不自动播报、保存音频或朗读超过 4000 字符的单次请求；音频本身不会传给在线模型或 A2A 对端。
 - 显示远端处理进度和结果；电脑端要求补充信息时，下一条消息继续同一远端任务。
 - 同一个手机会话对同一个 A2A 连接复用服务端返回的 `contextId`，让多次已完成的任务进入同一电脑端会话；需要补充信息或授权的未完成任务仍用 `taskId` 续接。不同手机会话、不同连接分别保存上下文。升级前的会话会优先恢复最早任务的上下文；若历史结果未保存上下文且服务端已清除任务记录，会停止发送并明确提示，避免悄悄创建第三个会话。
 - 使用同一个 Room 数据库保存会话列表、界面文本记录、SDK 会话树、A2A 连接上下文及待继续的任务 ID；附件内容不保存在会话中。模型 API Key 按提供商、Bearer Token 单独用 Android Keystore 加密后保存在应用私有存储，重启应用仍可使用；在设置中留空并保存可清除。
@@ -47,7 +48,7 @@ Android 不允许应用直接读取另一个应用的 `Android/data` 目录。�
 
 ## 构建与运行
 
-需要 JDK 17、Android SDK（`compileSdk 35`），以及与本仓库同级检出的 `kiora` SDK。先在 `../kiora` 发布 SDK 0.3.0-SNAPSHOT 到本机 Maven。Paddle OCR 适配器还需要按 SDK 的 OCR 文档构建官方 AAR；若 AAR 不在脚本的默认路径，给 `install-paddle-ocr.ps1` 传入 `-Aar` 绝对路径。SenseVoice 模型权重不进入仓库或 APK，运行时由用户导入。
+需要 JDK 17、Android SDK（`compileSdk 35`），以及与本仓库同级检出的 `kiora` SDK。先在 `../kiora` 发布 SDK 0.3.0-SNAPSHOT 到本机 Maven。Paddle OCR 适配器还需要按 SDK 的 OCR 文档构建官方 AAR；若 AAR 不在脚本的默认路径，给 `install-paddle-ocr.ps1` 传入 `-Aar` 绝对路径。SenseVoice 与 MeloTTS 模型权重不进入仓库或 APK，运行时由用户导入。MeloTTS 的固定修订、模型准备脚本和验收边界见 SDK 的 [离线语音合成](../kiora/docs/speech-synthesis.md)。
 
 ```powershell
 cd ..\kiora
@@ -80,7 +81,7 @@ APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。在聊天输入栏点�
 
 ## SDK 集成位置
 
-`app/build.gradle.kts` 引用 Kiora SDK 模块；`settings.gradle.kts` 先查找 `mavenLocal()` 中最新发布的 SDK，再使用 `-PkioraLocalRepo` 指定的本地仓库补齐第三方依赖。修改 SDK `core` 后先运行 `:core:publishToMavenLocal`，再构建 Companion。`CompanionAgent` 将模型、A2A、会话存储、工具授权和文件读取组合起来；`MainActivity` 负责界面、系统选择器及发送确认。
+`app/build.gradle.kts` 引用 Kiora SDK 模块；所有 `dev.kiora` 模块统一从 `mavenLocal()` 读取，`-PkioraLocalRepo` 只补充第三方原生依赖，明确排除其中可能残留的旧 SDK 快照。修改 SDK 后先重新发布所用模块，再构建 Companion；不要混用按不同 LiteRT-LM 版本编译的适配器。`CompanionAgent` 将模型、A2A、会话存储、工具授权和文件读取组合起来；`MainActivity` 负责界面、手动朗读、系统选择器及发送确认。
 
 当前版本处理文本与小型内联附件；较大文件、远端返回文件下载和后台任务通知留待后续版本。
 

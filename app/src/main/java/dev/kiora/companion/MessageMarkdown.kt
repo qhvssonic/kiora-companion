@@ -32,4 +32,6 @@ class MessageMarkdown(context: Context) {
     fun render(view: TextView, source: String) {
         markwon.setMarkdown(view, MobileMarkdownTables.format(source))
     }
+
+    fun plainText(source: String): String = markwon.toMarkdown(source).toString()
 }
