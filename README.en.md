@@ -2,11 +2,17 @@
 
 **English** | [简体中文](README.md)
 
-Kiora Companion is an Android host application built on the [Kiora SDK](https://github.com/qhvssonic/kiora). The current app version is **0.1.100** and uses SDK **`0.3.0-SNAPSHOT`**. It brings on-device models, document scanning, gallery search, local tools, authorization, and A2A collaboration into one conversation. The demonstration uses a computer-hosted DSH agent, but A2A peers are not limited to computers.
+Kiora Companion is an Android host application built on the [Kiora SDK](https://github.com/qhvssonic/kiora). The current app version is **0.1.103** and uses SDK **`0.3.0-SNAPSHOT`**. It brings on-device models, document scanning, gallery search, local tools, authorization, and A2A collaboration into one conversation. The demonstration uses a computer-hosted DSH agent, but A2A peers are not limited to computers.
 
 The code is licensed under [Apache-2.0](LICENSE). Model weights, native AARs, and the DSH plugin have separate upstream licenses.
 
 ## What the app does
+
+- Local face enrollment, multiple samples per person, deletion, 1:N candidate search and face-based photo search are available from the sidebar or settings. Import the official `buffalo_sc` directory separately; its weights are for non-commercial research only. Templates stay in private storage and are never automatically added to chat or uploaded. Gallery indexing respects current photo permissions. Results require user verification; no liveness or calibrated authentication guarantee is provided. See [face integration](https://github.com/qhvssonic/kiora/blob/main/docs/face-recognition.md).
+
+  Person and gallery queries support a live camera scan with an animated guide. One clear, centered face must remain consistent across multiple preview frames before querying automatically. Frames are processed in memory without taking or saving a photo. Enrollment still requires explicit capture or photo selection. Leaving the scanner releases the camera; temporal consistency is not liveness detection.
+
+  The sidebar has a face-scan outline icon; the page uses the app's grouped cards and bottom sheets. Person templates and the multi-face photo index are stored in private SQLite `databases/faces.db`. Version 0.1.103 passed 52 JVM tests and three opt-in device regressions. Live front-camera person and photo queries and subsequent camera release were smoke-tested on V2509A / Android 16. These results do not establish population-level accuracy or large-gallery performance; see the [validation record](https://github.com/qhvssonic/kiora/blob/main/docs/face-recognition.md#验证).
 
 - **Choose a model:** run a user-imported LiteRT-LM `.litertlm` model, an MNN model directory, or a Chat Completions-compatible API. LiteRT-LM offers CPU/GPU selection; MNN runs inside the app process without MNN Chat or a local HTTP service. MNN native libraries are currently packaged for `arm64-v8a` only.
 - **Scan and prepare documents:** capture multiple pages or import several images, reorder and review pages, correct local PP-OCRv6 results, and save a draft. The agent can write corrected text into a Markdown file before sending that completed file to an A2A peer.
@@ -69,7 +75,7 @@ Requirements: **JDK 17**, Android SDK with `compileSdk 35`, a sibling checkout o
 
 ```powershell
 cd ..\kiora
-.\gradlew.bat :core:publishToMavenLocal :a2a:publishToMavenLocal :model-chat:publishToMavenLocal :model-mnn:publishToMavenLocal :model-litert:publishToMavenLocal :embedding:publishToMavenLocal :embedding-mediapipe:publishToMavenLocal :android-attachments:publishToMavenLocal :android-storage-tools:publishToMavenLocal :document-ocr:publishToMavenLocal
+.\gradlew.bat :core:publishToMavenLocal :a2a:publishToMavenLocal :model-chat:publishToMavenLocal :model-mnn:publishToMavenLocal :model-litert:publishToMavenLocal :embedding:publishToMavenLocal :face:publishToMavenLocal :face-onnx:publishToMavenLocal :embedding-mediapipe:publishToMavenLocal :android-attachments:publishToMavenLocal :android-storage-tools:publishToMavenLocal :document-ocr:publishToMavenLocal
 .\scripts\install-sherpa-onnx.ps1
 .\gradlew.bat :speech:publishToMavenLocal :speech-sherpa-onnx:publishToMavenLocal -PsherpaLocalRepo=..\artifacts\maven
 .\scripts\install-paddle-ocr.ps1

@@ -122,9 +122,10 @@ internal object SettingsSheet {
     }
 
     fun showForm(activity: Activity, title: String, subtitle: String, form: View,
+                 actionLabel: String = "保存",
                  onSave: () -> Boolean): Dialog {
         val sheet = create(activity, title, subtitle)
-        sheet.heading.addView(activity.action("保存", true) {
+        sheet.heading.addView(activity.action(actionLabel, true) {
             if (onSave()) sheet.dialog.dismiss()
         }, sheet.heading.childCount - 1, LinearLayout.LayoutParams(activity.dp(66), activity.dp(38)).apply {
             rightMargin = activity.dp(4)

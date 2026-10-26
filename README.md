@@ -2,7 +2,7 @@
 
 [English](README.en.md) | **简体中文**
 
-独立的 Android 应用，作为宿主集成 [Kiora SDK](https://github.com/qhvssonic/kiora)。当前应用版本为 0.1.100，依赖 SDK `0.3.0-SNAPSHOT`。它展示移动端智能体的完整流程：选择 LiteRT-LM 或 MNN 本机模型，在手机扫描与整理多页资料、检索相册，再按用户授权通过 A2A 将任务和文件交给其他 Agent；本次演示连接电脑端 DSH。应用也支持兼容在线模型 API，界面提供可搜索的会话侧边栏、顶部模型选择入口和底部附件输入区。
+独立的 Android 应用，作为宿主集成 [Kiora SDK](https://github.com/qhvssonic/kiora)。当前应用版本为 0.1.103，依赖 SDK `0.3.0-SNAPSHOT`。它展示移动端智能体的完整流程：选择 LiteRT-LM 或 MNN 本机模型，在手机扫描与整理多页资料、检索相册，再按用户授权通过 A2A 将任务和文件交给其他 Agent；本次演示连接电脑端 DSH。应用也支持兼容在线模型 API，界面提供可搜索的会话侧边栏、顶部模型选择入口和底部附件输入区。
 
 许可证：[Apache-2.0](LICENSE)。上游模型、Android AAR 和 DSH 插件分别遵循其各自的许可证。
 
@@ -46,13 +46,36 @@ Android 不允许应用直接读取另一个应用的 `Android/data` 目录。�
 
 安装版 `@ryubyte/dsh-a2a` 0.3.1 默认忽略 raw 文件 Part。本仓库 `scripts/patch-dsh-a2a-attachment-bridge.mjs` 在入站执行器调用 DSH Agent 前校验并暂存附件，仅把用户指令与本地文件路径、MIME、大小和 SHA-256 交给模型；文件的保存目标或分析方式仍由 DSH Agent 按用户指令决定。`scripts/configure-dsh-a2a-delegate.mjs` 配置通用 `delegate_task` 技能及文件输入类型，保留原 Bearer Token 和出站连接。本机的独立副本、原版与桥接版快照、设计及升级说明保存在仓库外的 `../DSH-A2A-通用附件桥接/`；插件升级后须先核对新版本，再移植补丁。这些 DSH 脚本不属于 Companion 的构建步骤。
 
+## 本地人脸
+
+侧栏「本地人脸 · 注册与查找」提供离线人员注册、多样本追加、删除、1:N 候选搜索以及按人脸查相册。
+也可从设置页进入。导入 InsightFace 官方 `buffalo_sc` 解压后的整个目录；仅接受固定 SHA-256 的
+`det_500m.onnx` 和 `w600k_mbf.onnx`。权重仅供非商业研究，未包含在仓库或 APK。
+模型准备与 SDK 接口见 [人脸接入](https://github.com/qhvssonic/kiora/blob/main/docs/face-recognition.md)。
+
+侧栏入口使用人脸扫描线条图标，人脸页使用与设置页一致的分组卡片和底部弹窗；“注册”位于人员分组右侧，
+清空索引和删除全部数据位于右上角“⋯”菜单中。
+
+识别和查找支持实时扫描：取景框内显示扫描动画，连续确认一张清晰、稳定的人脸后自动查询，
+无需按拍照键。预览帧仅在内存分析，不生成照片；扫描稳定性判断不等于活体检测。
+注册仍需主动拍照或选图。相机只在用户打开时运行，返回或切到后台即释放，注册临时照片处理后删除。
+人员特征与多脸相册索引存在应用私有 SQLite `databases/faces.db`，原始相册照片不复制到该数据库。
+照片访问通过 Android 授权，查询前清理已撤权、删除或变化的索引；无清晰人脸的照片也记录处理版本。
+索引可停止并增量继续，不提供后台任务。删除人员、清空相册索引和删除全部人脸数据分别操作。
+不自动加入智能体工具，不上传照片或特征。搜索结果为候选，当前阈值尚未进行真实人群校准，也不包含活体检测。
+
+0.1.103 验证记录：52 项 JVM 测试和 3 项显式开启的真机回归通过，覆盖预览转换/稳定判断、
+模型推理、注册与索引存储、多人选图及扫描结果查询。V2509A / Android 16 已实测前置扫描自动识别、
+查找相册及查询后的相机释放。公开样例验证不代表真实人群准确率或大相册性能验收。
+测试输入、运行方式和具体边界见 [人脸验证说明](https://github.com/qhvssonic/kiora/blob/main/docs/face-recognition.md#验证)。
+
 ## 构建与运行
 
 需要 JDK 17、Android SDK（`compileSdk 35`），以及与本仓库同级检出的 `kiora` SDK。先在 `../kiora` 发布 SDK 0.3.0-SNAPSHOT 到本机 Maven。Paddle OCR 适配器还需要按 SDK 的 OCR 文档构建官方 AAR；若 AAR 不在脚本的默认路径，给 `install-paddle-ocr.ps1` 传入 `-Aar` 绝对路径。SenseVoice 与 MeloTTS 模型权重不进入仓库或 APK，运行时由用户导入。MeloTTS 的固定修订、模型准备脚本和验收边界见 SDK 的 [离线语音合成](../kiora/docs/speech-synthesis.md)。
 
 ```powershell
 cd ..\kiora
-.\gradlew.bat :core:publishToMavenLocal :a2a:publishToMavenLocal :model-chat:publishToMavenLocal :model-mnn:publishToMavenLocal :model-litert:publishToMavenLocal :embedding:publishToMavenLocal :embedding-mediapipe:publishToMavenLocal :android-attachments:publishToMavenLocal :android-storage-tools:publishToMavenLocal :document-ocr:publishToMavenLocal
+.\gradlew.bat :core:publishToMavenLocal :a2a:publishToMavenLocal :model-chat:publishToMavenLocal :model-mnn:publishToMavenLocal :model-litert:publishToMavenLocal :embedding:publishToMavenLocal :face:publishToMavenLocal :face-onnx:publishToMavenLocal :embedding-mediapipe:publishToMavenLocal :android-attachments:publishToMavenLocal :android-storage-tools:publishToMavenLocal :document-ocr:publishToMavenLocal
 .\scripts\install-sherpa-onnx.ps1
 .\gradlew.bat :speech:publishToMavenLocal :speech-sherpa-onnx:publishToMavenLocal -PsherpaLocalRepo=..\artifacts\maven
 .\scripts\install-paddle-ocr.ps1

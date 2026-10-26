@@ -11,8 +11,8 @@ android {
         applicationId = "dev.kiora.companion"
         minSdk = 26
         targetSdk = 34
-        versionCode = 101
-        versionName = "0.1.100"
+        versionCode = 104
+        versionName = "0.1.103"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         if (providers.gradleProperty("ocrCompareArm64Only").isPresent) {
             ndk.abiFilters += "arm64-v8a"
@@ -40,6 +40,7 @@ dependencies {
     implementation("dev.kiora:kiora-model-chat:0.3.0-SNAPSHOT")
     implementation("dev.kiora:kiora-model-litert:0.3.0-SNAPSHOT")
     implementation("dev.kiora:kiora-embedding:0.3.0-SNAPSHOT")
+    implementation("dev.kiora:kiora-face-onnx:0.3.0-SNAPSHOT")
     implementation("dev.kiora:kiora-embedding-mediapipe:0.3.0-SNAPSHOT")
     implementation("dev.kiora:kiora-model-mnn:0.3.0-SNAPSHOT")
     implementation("dev.kiora:kiora-a2a:0.3.0-SNAPSHOT")

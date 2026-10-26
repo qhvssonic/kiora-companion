@@ -217,6 +217,12 @@ class SettingsActivity : Activity() {
         refreshStorageGrants()
         refreshAlbumSettings()
 
+        section(content, "本地人脸")
+        selectionRow(content, "人脸注册与查找") {
+            startActivity(Intent(this, FaceActivity::class.java))
+        }.text = "自拍识别 · 人员管理 · 相册找人  ›"
+        content.addView(note("人脸特征保存在本机；由你主动采集和查找，不会自动上传或加入聊天工具。"))
+
         section(content, "端侧语音识别")
         voiceModelValue = selectionRow(content, "SenseVoice Small int8 模型") { chooseVoiceFile(true) }
         voiceTokensValue = selectionRow(content, "SenseVoice tokens.txt") { chooseVoiceFile(false) }

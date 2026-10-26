@@ -27,6 +27,8 @@
         <activity android:name=".SettingsActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".ImagePreviewActivity" android:exported="false" />
         <activity android:name=".AlbumIndexActivity" android:exported="false" />
+        <activity android:name=".FaceActivity" android:exported="false" />
+        <activity android:name=".FaceCameraActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".DocumentScanActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".A2aPortraitCaptureActivity"

@@ -1976,6 +1976,16 @@ class MainActivity : Activity() {
             setOnClickListener { hideHistory(); prepareAlbumSearch() }
         }, LinearLayout.LayoutParams(-1, dp(52)))
         panel.addView(TextView(this).apply {
+            text = "本地人脸 · 注册与查找"
+            setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_face_scan, 0, 0, 0)
+            compoundDrawablePadding = dp(10)
+            textSize = 15f
+            setTextColor(INK)
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), 0, 0, 0)
+            setOnClickListener { hideHistory(); startActivity(Intent(this@MainActivity, FaceActivity::class.java)) }
+        }, LinearLayout.LayoutParams(-1, dp(52)))
+        panel.addView(TextView(this).apply {
             text = "⚙   模型与连接设置"
             textSize = 15f
             setTextColor(INK)
