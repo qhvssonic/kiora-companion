@@ -31,6 +31,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 
 /** Full-screen provider and connection settings; secrets only return to the current process. */
@@ -83,6 +84,9 @@ class SettingsActivity : Activity() {
     private lateinit var albumIndexValue: TextView
     private lateinit var voiceModelValue: TextView
     private lateinit var voiceTokensValue: TextView
+    private lateinit var voiceBackendValue: TextView
+    private lateinit var streamingVoiceValue: TextView
+    private var importingStreamingVoice = false
     private val voiceFiles by lazy { VoiceModelFiles(this) }
     private lateinit var ttsModelValue: TextView
     private var importingTts = false
@@ -224,16 +228,30 @@ class SettingsActivity : Activity() {
         content.addView(note("人脸特征保存在本机；由你主动采集和查找，不会自动上传或加入聊天工具。"))
 
         section(content, "端侧语音识别")
+        voiceBackendValue = selectionRow(content, "语音输入方式") {
+            val prefs = VoicePreferences(this)
+            SettingsSheet.showOptions(this, "语音输入方式", "同一个麦克风按钮",
+                listOf(SettingsSheet.Option("Paraformer · 实时转写", "边说边显示文字；停止后可修改再发送"),
+                    SettingsSheet.Option("SenseVoice · 录完转写", "结束录音后生成整段文字")),
+                if (prefs.backend == VoiceBackend.PARAFORMER) 0 else 1) { index ->
+                prefs.backend = if (index == 0) VoiceBackend.PARAFORMER else VoiceBackend.SENSE_VOICE
+                refreshVoiceFiles()
+            }
+        }
+        streamingVoiceValue = selectionRow(content, "Paraformer 中英双语 int8 目录") {
+            if (!importingStreamingVoice)
+                startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), PICK_STREAMING_VOICE_FOLDER)
+        }
         voiceModelValue = selectionRow(content, "SenseVoice Small int8 模型") { chooseVoiceFile(true) }
         voiceTokensValue = selectionRow(content, "SenseVoice tokens.txt") { chooseVoiceFile(false) }
-        content.addView(note("导入 sherpa-onnx 版 model.int8.onnx 和同一模型包的 tokens.txt。文件复制到应用私有存储；录音只在本机转写，结果可修改后发送。"))
+        content.addView(note("实时转写请选择包含 encoder.int8.onnx、decoder.int8.onnx、tokens.txt 的完整目录。SenseVoice 则分别导入 model.int8.onnx 和 tokens.txt。录音只在本机处理，切到后台自动停止；每次只加载选中的识别模型。"))
         refreshVoiceFiles()
 
         section(content, "离线朗读")
         ttsModelValue = selectionRow(content, "MeloTTS 中文朗读模型") {
             if (!importingTts) startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), PICK_TTS_FOLDER)
         }
-        content.addView(note("选择解压后的完整 MeloTTS 模型目录。推荐 FP32（model.onnx，约 170 MB），也支持 int8。导入后可朗读助手回复，也可要求智能体朗读文字；音频只在本机生成和播放。"))
+        content.addView(note("选择解压后的完整 MeloTTS 模型目录。推荐 FP32（model.onnx，约 170 MB），也支持 int8。导入后可点击助手回复旁的朗读图标；音频只在本机生成和播放。"))
         refreshTtsModel()
 
         section(content, "工具授权")
@@ -245,7 +263,7 @@ class SettingsActivity : Activity() {
         content.addView(note("在应用权限下执行命令，工作区目录不是访问边界。开启后仍按上方授权方式批准调用。"))
         refreshShellEnabled()
         if (intent.getBooleanExtra("focus_voice", false)) {
-            scroll.post { scroll.smoothScrollTo(0, (voiceModelValue.parent as View).top - dp(24)) }
+            scroll.post { scroll.smoothScrollTo(0, (voiceBackendValue.parent as View).top - dp(24)) }
         }
         if (intent.getBooleanExtra("focus_album", false)) {
             scroll.post { scroll.smoothScrollTo(0, (albumModelValue.parent as View).top - dp(24)) }
@@ -713,6 +731,9 @@ class SettingsActivity : Activity() {
     }
 
     private fun refreshVoiceFiles() {
+        voiceBackendValue.text = VoicePreferences(this).backend.label + "  ›"
+        if (!importingStreamingVoice) streamingVoiceValue.text =
+            if (StreamingVoiceModelFiles(this).current() != null) "已导入 · 237 MB  ›" else "选择模型目录  ›"
         voiceModelValue.text = if (voiceFiles.model.isFile) "已导入 · ${voiceFiles.model.length() / 1_000_000} MB  ›"
             else "导入 model.int8.onnx  ›"
         voiceTokensValue.text = if (voiceFiles.tokens.isFile) "已导入 tokens.txt  ›"
@@ -834,6 +855,24 @@ class SettingsActivity : Activity() {
             return
         }
         if (resultCode != RESULT_OK) return
+        if (requestCode == PICK_STREAMING_VOICE_FOLDER) {
+            val uri = data?.data ?: return
+            if (importingStreamingVoice) return
+            importingStreamingVoice = true
+            streamingVoiceValue.text = "正在导入并校验实时转写模型…"
+            scope.launch {
+                try {
+                    withContext(Dispatchers.IO) { StreamingVoiceModelFiles(this@SettingsActivity).importTree(uri) }
+                    importingStreamingVoice = false
+                    refreshVoiceFiles()
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    streamingVoiceValue.text = "导入失败：${error.message ?: "请检查模型文件和可用空间"}"
+                } finally { importingStreamingVoice = false }
+            }
+            return
+        }
         if (requestCode == PICK_TTS_FOLDER) {
             val uri = data?.data ?: return
             if (importingTts) return
@@ -887,7 +926,7 @@ class SettingsActivity : Activity() {
             value.text = "正在导入 $name…"
             scope.launch {
                 try {
-                    withContext(Dispatchers.IO) { voiceFiles.import(uri, modelFile) }
+                    withContext(Dispatchers.IO) { VoiceRuntime.mutex.withLock { voiceFiles.import(uri, modelFile) } }
                     refreshVoiceFiles()
                 } catch (error: Exception) {
                     value.text = "导入失败：${error.message ?: "请检查可用空间"}"
@@ -954,6 +993,7 @@ class SettingsActivity : Activity() {
         const val REQUEST_CAMERA_QR = 2306
         const val PICK_MNN_FOLDER = 2307
         const val PICK_TTS_FOLDER = 2308
+        const val PICK_STREAMING_VOICE_FOLDER = 2309
         const val BG = 0xFFFAFAF8.toInt()
         const val PALE = 0xFFF1F3F0.toInt()
         const val INK = 0xFF20201F.toInt()

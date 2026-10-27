@@ -40,9 +40,7 @@ import dev.kiora.core.AgentMessage
 import dev.kiora.core.QueuedUserInput
 import dev.kiora.core.ToolAuthorization
 import dev.kiora.core.ToolAuthorizationRequest
-import dev.kiora.speech.Pcm16Audio
 import dev.kiora.speech.SpeechSynthesisRequest
-import dev.kiora.speech.sherpa.SenseVoiceRecognizer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -117,7 +115,10 @@ class MainActivity : Activity() {
     private var connecting = false
     private var modelReady = false
     private val voiceFiles by lazy { VoiceModelFiles(this) }
-    private val voiceRecorder by lazy { PushToTalkRecorder(::onVoiceRecorded, ::onVoiceLevel) }
+    private var voiceRecorder: PushToTalkRecorder? = null
+    private var voiceJob: Job? = null
+    private var voiceDraftRenderer: VoiceDraftRenderer? = null
+    private var voiceGeneration = 0L
     private var voiceProcessing = false
     private var voicePending = false
     private var recordingWaveform: RecordingWaveformDrawable? = null
@@ -183,7 +184,7 @@ class MainActivity : Activity() {
         speech.stop()
         if (this::voiceButton.isInitialized) {
             recordingWaveform = null
-            voiceRecorder.cancel()
+            cancelVoice()
         }
         scope.cancel()
         CoroutineScope(Dispatchers.IO).launch { runCatching { agent.close() } }
@@ -193,6 +194,7 @@ class MainActivity : Activity() {
     override fun onStop() {
         speech.stop()
         speechJob?.cancel()
+        cancelVoice()
         super.onStop()
     }
 
@@ -583,6 +585,7 @@ class MainActivity : Activity() {
     private fun showConversation() {
         speech.stop()
         speechJob?.cancel()
+        cancelVoice()
         val id = currentConversationId ?: return
         val connectionAtLoad = connectionRequest
         val loadingDuringConnection = connecting
@@ -1399,23 +1402,25 @@ class MainActivity : Activity() {
     }
 
     private fun toggleVoice() {
-        if (voiceRecorder.isRecording) {
-            voicePending = true
-            voiceRecorder.stop()
-            recordingWaveform = null
-            voiceButton.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0)
-            voiceButton.text = "…"
-            voiceButton.contentDescription = "正在结束录音"
-            status.text = "正在准备语音转写…"
+        if (voiceRecorder?.isRecording == true) {
+            voiceRecorder?.stop()
+            showVoiceFinalizing()
             return
         }
-        if (voicePending || voiceProcessing) return
+        if (voiceProcessing) return
+        if (voicePending) {
+            cancelVoice()
+            return
+        }
         if (busy) {
             status.text = "请等待当前回复完成"
             return
         }
-        if (!voiceFiles.ready) {
-            status.text = "请先在设置中导入 SenseVoice 模型和 tokens.txt"
+        val backend = VoicePreferences(this).backend
+        val ready = if (backend == VoiceBackend.PARAFORMER)
+            StreamingVoiceModelFiles(this).current() != null else voiceFiles.ready
+        if (!ready) {
+            status.text = "请先在设置中导入所选语音识别模型"
             showSettings(voice = true)
             return
         }
@@ -1427,54 +1432,89 @@ class MainActivity : Activity() {
     }
 
     private fun startVoice() {
-        try {
-            speech.stop()
-            speechJob?.cancel()
-            voiceRecorder.start(scope)
-            voicePending = true
-            showRecordingWaveform()
-            status.text = "正在收音 · 再点一次结束，最长 30 秒"
-        } catch (error: Exception) {
-            voicePending = false
-            status.text = "无法录音：${error.message ?: "请检查麦克风"}"
-        }
-    }
-
-    private fun onVoiceRecorded(result: Result<Pcm16Audio>) {
-        voicePending = false
-        showIdleVoiceButton()
-        val audio = result.getOrElse {
-            status.text = "录音失败：${it.message ?: "请重试"}"
-            return
-        }
-        voiceProcessing = true
+        if (voiceJob?.isActive == true || busy) return
+        speech.stop()
+        speechJob?.cancel()
+        val generation = ++voiceGeneration
+        val backend = VoicePreferences(this).backend
+        val existing = composer.text.toString()
+        val recorder = PushToTalkRecorder()
+        voiceRecorder = recorder
+        voicePending = true
+        voiceProcessing = false
+        composer.isEnabled = false
+        val draftRenderer = VoiceDraftRenderer(composer, existing)
+        voiceDraftRenderer = draftRenderer
         voiceButton.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0)
         voiceButton.text = "…"
-        voiceButton.contentDescription = "正在转写语音"
-        status.text = "正在本机转写…"
-        scope.launch {
+        voiceButton.contentDescription = "正在打开麦克风，点按取消"
+        status.text = "正在打开麦克风…"
+        voiceJob = scope.launch {
             try {
-                val transcript = withContext(Dispatchers.IO) {
-                    SenseVoiceRecognizer(voiceFiles.model, voiceFiles.tokens).use { it.transcribe(audio) }
-                }
-                if (transcript.text.isBlank()) {
-                    status.text = "未识别到语音，请重试"
-                } else {
-                    val existing = composer.text.toString().trimEnd()
-                    composer.setText(if (existing.isBlank()) transcript.text else "$existing ${transcript.text}")
-                    composer.setSelection(composer.length())
-                    status.text = "转写完成 · 请核对或修改文字，再点发送"
-                    composer.requestFocus()
+                val text = VoiceInputRunner(applicationContext).transcribe(backend, recorder,
+                    onStarted = {
+                        if (generation == voiceGeneration) {
+                            showRecordingWaveform()
+                            status.text = if (backend == VoiceBackend.PARAFORMER)
+                                "正在收音 · 可以开始说话，再点一次结束" else
+                                "正在收音 · 再点一次结束，最长 30 秒"
+                        }
+                    },
+                    onLevel = { if (generation == voiceGeneration) onVoiceLevel(it) },
+                    onPartial = { if (generation == voiceGeneration) draftRenderer.submit(it) },
+                    onFinalizing = { if (generation == voiceGeneration) showVoiceFinalizing() },
+                )
+                if (generation == voiceGeneration) {
+                    draftRenderer.finish(text)
+                    status.text = if (text.isBlank()) "未识别到语音，请重试" else
+                        "转写完成 · 请核对或修改文字，再点发送"
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                status.text = "转写失败：${error.message ?: "请检查语音模型文件"}"
+                if (generation == voiceGeneration) {
+                    draftRenderer.flush()
+                    status.text = "转写未完成：${error.message ?: "请检查语音模型文件"}"
+                }
             } finally {
-                voiceProcessing = false
-                showIdleVoiceButton()
+                if (generation == voiceGeneration) {
+                    draftRenderer.close()
+                    voiceDraftRenderer = null
+                    voicePending = false
+                    voiceProcessing = false
+                    voiceRecorder = null
+                    voiceJob = null
+                    composer.isEnabled = true
+                    showIdleVoiceButton()
+                }
             }
         }
+    }
+
+    private fun showVoiceFinalizing() {
+        voicePending = false
+        voiceProcessing = true
+        recordingWaveform = null
+        voiceButton.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0)
+        voiceButton.text = "…"
+        voiceButton.contentDescription = "正在完成语音转写"
+        status.text = "正在完成转写…"
+    }
+
+    private fun cancelVoice() {
+        val wasActive = voicePending || voiceProcessing
+        ++voiceGeneration
+        voiceDraftRenderer?.close()
+        voiceDraftRenderer = null
+        voiceRecorder?.stop()
+        voiceJob?.cancel()
+        voiceJob = null
+        voiceRecorder = null
+        voicePending = false
+        voiceProcessing = false
+        if (this::composer.isInitialized) composer.isEnabled = true
+        if (this::voiceButton.isInitialized) showIdleVoiceButton()
+        if (wasActive) status.text = "语音输入已停止 · 已显示的文字可修改后发送"
     }
 
     private fun showIdleVoiceButton() {
