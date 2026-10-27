@@ -69,6 +69,17 @@ In DSH `@ryubyte/dsh-a2a`, create an external Agent service, publish it, and cop
 
 The installed `@ryubyte/dsh-a2a` 0.3.1 plugin ignores incoming `raw` file parts by default. This repository contains `scripts/patch-dsh-a2a-attachment-bridge.mjs` to validate and stage such attachments before DSH invokes its agent, and `scripts/configure-dsh-a2a-delegate.mjs` to configure a general file-capable skill. These scripts change the **DSH installation**, are not part of the Companion build, and must be reviewed again after a plugin upgrade. DSH may receive readable local attachment files; Kiora's upload authorization does not prevent the recipient from examining their contents.
 
+## Roadmap: Fun-ASR dialect voice input
+
+**Planned, pending SDK integration and device validation. Fun-ASR is not available in the current app.**
+
+- [ ] Add a SenseVoice / Fun-ASR backend selector while preserving the existing SenseVoice configuration.
+- [ ] Support separate model-directory import, integrity checks and readiness feedback for offline use after setup.
+- [ ] Reuse button-triggered recording and editable transcription: users review the text before sending; raw recordings are not uploaded automatically.
+- [ ] Test backend switching, cancellation, background exit, missing models and alternating with chat/TTS; compare recognition using real dialect samples.
+
+The first iteration keeps explicit recording controls. Target dialects and supported scope will be determined by sample evaluation. See the [SDK integration stages and acceptance criteria](https://github.com/qhvssonic/kiora/blob/main/docs/mobile-agent-roadmap.md#fun-asr-plan).
+
 ## Build and run
 
 Requirements: **JDK 17**, Android SDK with `compileSdk 35`, a sibling checkout of the [Kiora SDK](https://github.com/qhvssonic/kiora), and the optional native artifacts used by OCR and speech. Publish SDK `0.3.0-SNAPSHOT` modules to `mavenLocal()` before building Companion. From the SDK directory:

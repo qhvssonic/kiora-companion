@@ -69,6 +69,17 @@ Android 不允许应用直接读取另一个应用的 `Android/data` 目录。�
 查找相册及查询后的相机释放。公开样例验证不代表真实人群准确率或大相册性能验收。
 测试输入、运行方式和具体边界见 [人脸验证说明](https://github.com/qhvssonic/kiora/blob/main/docs/face-recognition.md#验证)。
 
+## 后续计划：Fun-ASR 方言语音输入
+
+**状态：已列入计划，等待 SDK 适配与真机验证，当前版本尚未提供 Fun-ASR。**
+
+- [ ] 在语音输入设置中增加 SenseVoice / Fun-ASR 后端选择，保留现有 SenseVoice 配置。
+- [ ] 增加独立模型目录导入、完整性校验和准备状态提示，模型准备完成后可离线使用。
+- [ ] 复用按键录音与可编辑转写流程：用户检查识别文字后再发送，不自动上传原始录音。
+- [ ] 测试后端切换、取消、后台退出、模型缺失及与聊天/朗读交替使用；用实际方言样本比较识别效果。
+
+首轮保持按键录音交互，目标方言与支持范围通过样本测试确定。SDK 适配、运行库复用和验收阶段见 [Fun-ASR 集成计划](https://github.com/qhvssonic/kiora/blob/main/docs/mobile-agent-roadmap.md#fun-asr-plan)。
+
 ## 构建与运行
 
 需要 JDK 17、Android SDK（`compileSdk 35`），以及与本仓库同级检出的 `kiora` SDK。先在 `../kiora` 发布 SDK 0.3.0-SNAPSHOT 到本机 Maven。Paddle OCR 适配器还需要按 SDK 的 OCR 文档构建官方 AAR；若 AAR 不在脚本的默认路径，给 `install-paddle-ocr.ps1` 传入 `-Aar` 绝对路径。SenseVoice 与 MeloTTS 模型权重不进入仓库或 APK，运行时由用户导入。MeloTTS 的固定修订、模型准备脚本和验收边界见 SDK 的 [离线语音合成](../kiora/docs/speech-synthesis.md)。
