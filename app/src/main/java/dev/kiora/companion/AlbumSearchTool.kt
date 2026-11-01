@@ -86,11 +86,13 @@ internal class AlbumSearchService(private val context: Context) {
                 index.entries(modelId)
             }
             if (entries.isEmpty()) return Result(emptyList())
-            val port = EmbeddingGemma2Port(context, modelFile, modelId)
-            val queryVector = try {
-                port.embedQuery(query)
-            } finally {
-                port.close()
+            val queryVector = InferenceResources.withInference("album-query") {
+                val port = EmbeddingGemma2Port(context, modelFile, modelId)
+                try {
+                    port.embedQuery(query)
+                } finally {
+                    withContext(NonCancellable) { port.close() }
+                }
             }
             return Result(rank(queryVector, entries, limit))
         } finally {

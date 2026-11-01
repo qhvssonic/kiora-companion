@@ -19,30 +19,37 @@ internal object StreamingVoicePipeline {
         capture: suspend (suspend (Pcm16Audio) -> Unit) -> Unit,
         onText: suspend (String) -> Unit,
         onFinalizing: suspend () -> Unit,
-    ): String {
-        var owned: StreamingSpeechSession? = null
-        try {
-            return coroutineScope {
-                val ready = CompletableDeferred<StreamingSpeechSession>()
-                launch {
+        coordinate: suspend (suspend () -> Unit) -> Unit = { it() },
+    ): String = coroutineScope {
+        val ready = CompletableDeferred<StreamingSpeechSession>()
+        val finished = CompletableDeferred<Unit>()
+        launch {
+            coordinate {
+                var owned: StreamingSpeechSession? = null
+                try {
                     val session = openSession()
                     owned = session
                     ready.complete(session)
+                    finished.await()
+                } finally {
+                    withContext(NonCancellable + Dispatchers.IO) { owned?.close() }
                 }
-                val transcript = StreamingTranscript()
-                capture { audio ->
-                    val updates = ready.await().accept(audio)
-                    if (updates.isNotEmpty()) {
-                        updates.forEach(transcript::apply)
-                        onText(transcript.text)
-                    }
-                }
-                onFinalizing()
-                ready.await().finish().forEach(transcript::apply)
-                transcript.text
             }
+        }
+        val transcript = StreamingTranscript()
+        try {
+            capture { audio ->
+                val updates = ready.await().accept(audio)
+                if (updates.isNotEmpty()) {
+                    updates.forEach(transcript::apply)
+                    onText(transcript.text)
+                }
+            }
+            onFinalizing()
+            ready.await().finish().forEach(transcript::apply)
+            transcript.text
         } finally {
-            withContext(NonCancellable + Dispatchers.IO) { owned?.close() }
+            finished.complete(Unit)
         }
     }
 }

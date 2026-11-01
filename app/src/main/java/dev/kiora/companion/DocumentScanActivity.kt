@@ -52,6 +52,7 @@ class DocumentScanActivity : Activity() {
     private var pendingCameraPageId: String? = null
     private var pageDisplayed = false
     private var recognizing = false
+    private var recognitionWork: kotlinx.coroutines.Job? = null
     private lateinit var preview: ImageView
     private lateinit var emptyPreview: TextView
     private lateinit var scanLine: View
@@ -109,6 +110,10 @@ class DocumentScanActivity : Activity() {
         scanAnimator?.cancel()
         scope.cancel()
         super.onDestroy()
+    }
+    override fun onStop() {
+        recognitionWork?.cancel()
+        super.onStop()
     }
 
     private fun buildUi() {
@@ -604,39 +609,41 @@ class DocumentScanActivity : Activity() {
             }
         updateActions()
         status.text = "正在本机识别 1 / ${pageIds.size} 页…"
-        scope.launch {
+        recognitionWork = scope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    val engine = PaddleDocumentOcr.create(applicationContext)
-                    try {
-                        pageIds.forEachIndexed { index, pageId ->
-                            val source = store.load(id)?.pages?.firstOrNull { it.id == pageId }?.source
-                                ?: return@forEachIndexed
-                            withContext(Dispatchers.Main) {
-                                status.text = "正在本机识别 ${index + 1} / ${pageIds.size} 页…"
+                    InferenceResources.withInference("ocr") {
+                        val engine = PaddleDocumentOcr.create(applicationContext)
+                        try {
+                            pageIds.forEachIndexed { index, pageId ->
+                                val source = store.load(id)?.pages?.firstOrNull { it.id == pageId }?.source
+                                    ?: return@forEachIndexed
+                                withContext(Dispatchers.Main) {
+                                    status.text = "正在本机识别 ${index + 1} / ${pageIds.size} 页…"
+                                }
+                                val started = SystemClock.elapsedRealtime()
+                                val recognized = try {
+                                    require(source.length() <= MAX_SOURCE_BYTES) { "图片超过 20 MiB" }
+                                    val page = engine.recognize(source.readBytes())
+                                    Recognized(page, DocumentDraftStore.EngineResult(
+                                        page.text, page.lines.size,
+                                        SystemClock.elapsedRealtime() - started, engine.coldLoadTimeMs))
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
+                                } catch (error: Exception) {
+                                    Log.e("KioraDocumentScan", "PP-OCRv6 failed on page ${index + 1}", error)
+                                    Recognized(null, DocumentDraftStore.EngineResult(
+                                        elapsedMs = SystemClock.elapsedRealtime() - started,
+                                        error = paddleErrorMessage(error)))
+                                }
+                                store.savePaddleResult(id, pageId, recognized.result)
+                                recognized.page?.takeIf { it.text.isNotBlank() }?.let {
+                                    store.saveRecognition(id, pageId, it)
+                                }
                             }
-                            val started = SystemClock.elapsedRealtime()
-                            val recognized = try {
-                                require(source.length() <= MAX_SOURCE_BYTES) { "图片超过 20 MiB" }
-                                val page = engine.recognize(source.readBytes())
-                                Recognized(page, DocumentDraftStore.EngineResult(
-                                    page.text, page.lines.size,
-                                    SystemClock.elapsedRealtime() - started, engine.coldLoadTimeMs))
-                            } catch (cancelled: CancellationException) {
-                                throw cancelled
-                            } catch (error: Exception) {
-                                Log.e("KioraDocumentScan", "PP-OCRv6 failed on page ${index + 1}", error)
-                                Recognized(null, DocumentDraftStore.EngineResult(
-                                    elapsedMs = SystemClock.elapsedRealtime() - started,
-                                    error = paddleErrorMessage(error)))
-                            }
-                            store.savePaddleResult(id, pageId, recognized.result)
-                            recognized.page?.takeIf { it.text.isNotBlank() }?.let {
-                                store.saveRecognition(id, pageId, it)
-                            }
+                        } finally {
+                            engine.release()
                         }
-                    } finally {
-                        engine.release()
                     }
                 }
                 val active = store.load(id)?.pages?.firstOrNull { it.id == currentPageId }
@@ -650,6 +657,7 @@ class DocumentScanActivity : Activity() {
                 refreshPages()
                 showDrafts()
             } catch (cancelled: CancellationException) {
+                status.text = "已停止识别，已完成的页面已保存"
                 throw cancelled
             } catch (error: Exception) {
                 status.text = "识别失败：${error.message ?: "请重试"}"
@@ -657,6 +665,7 @@ class DocumentScanActivity : Activity() {
                 Log.e("KioraDocumentScan", "PP-OCRv6 native loading failed", error)
                 status.text = "识别组件加载失败：${paddleErrorMessage(error)}"
             } finally {
+                recognitionWork = null
                 recognizing = false
                 scanAnimator?.cancel()
                 scanAnimator = null

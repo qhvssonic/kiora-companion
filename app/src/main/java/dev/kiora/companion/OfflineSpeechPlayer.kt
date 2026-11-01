@@ -54,7 +54,9 @@ internal class OfflineSpeechPlayer(
             return operationLock.withLock {
                 checkCurrent(ticket)
                 coroutineScope {
-                    val worker = async(Dispatchers.Default, start = CoroutineStart.LAZY) { play(ticket, request) }
+                    val worker = async(Dispatchers.Default, start = CoroutineStart.LAZY) {
+                        InferenceResources.withInference("tts") { play(ticket, request) }
+                    }
                     synchronized(audioLock) {
                         checkCurrent(ticket)
                         operation = worker

@@ -2,13 +2,6 @@ package dev.kiora.companion
 
 /** Select tools for the destination named by the user, without deciding whether to call one. */
 internal object RemoteTaskRouting {
-    private val remoteTarget = Regex("(?i)(DSH|A2A|电脑端|电脑上|远程|桌面|desktop|remote)")
-    private val phoneShell = Regex("(?i)(手机命令|手机上运行|手机端执行|Android\\s*shell|本机\\s*shell)")
-
-    fun requestsRemoteAgent(instruction: String): Boolean = remoteTarget.containsMatchIn(instruction)
-
-    fun requestsPhoneShell(instruction: String): Boolean = phoneShell.containsMatchIn(instruction)
-
     fun suggestAlias(name: String): String = name.trim().substringBefore(' ')
         .takeIf { it.matches(Regex("[A-Za-z][A-Za-z0-9_-]{1,31}")) }
         ?.lowercase().orEmpty()

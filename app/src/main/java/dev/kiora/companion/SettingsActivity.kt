@@ -74,6 +74,7 @@ class SettingsActivity : Activity() {
     private var mnnConfigPath = ""
     private var localBackend = "cpu"
     private var approvalMode = ApprovalMode.ASSIST
+    private var localDataMode = LocalDataMode.ASK
     private var shellEnabled = false
     private lateinit var approvalValue: TextView
     private lateinit var approvalNote: TextView
@@ -114,6 +115,7 @@ class SettingsActivity : Activity() {
             }.orEmpty()
         }
         approvalMode = ApprovalMode.fromKey(prefs.getString("approval_mode", null))
+        localDataMode = LocalDataMode.fromKey(prefs.getString("local_data_mode", null))
         shellEnabled = prefs.getBoolean("enable_shell", false)
         buildUi(oldEndpoint)
         refreshProvider()
@@ -255,6 +257,25 @@ class SettingsActivity : Activity() {
         refreshTtsModel()
 
         section(content, "工具授权")
+        lateinit var dataModeValue: TextView
+        dataModeValue = selectionRow(content, "本地资料处理") {
+            val modes = LocalDataMode.entries
+            SettingsSheet.showOptions(this, "本地资料处理", "在线模型与 A2A",
+                listOf(SettingsSheet.Option("外发前询问", "读取授权与外发授权分别确认"),
+                    SettingsSheet.Option("仅在本机处理", "阻止会话资料发送到在线模型及 A2A")),
+                modes.indexOf(localDataMode)) { index ->
+                localDataMode = modes[index]
+                dataModeValue.text = localDataMode.label
+            }
+        }
+        dataModeValue.text = localDataMode.label
+        selectionRow(content, "资料外发授权记录") {
+            val records = DataEgressAudit(this).recent()
+            SettingsSheet.showOptions(this, "最近的资料外发授权", "仅记录授权决定，不代表发送成功",
+                records.map { SettingsSheet.Option(it.first, it.second) }.ifEmpty {
+                    listOf(SettingsSheet.Option("暂无记录", "本地推理不会产生外发授权记录"))
+                }) { }
+        }.text = "查看最近 30 条"
         approvalValue = selectionRow(content, "授权方式") { chooseApprovalMode() }
         approvalNote = note("")
         content.addView(approvalNote)
@@ -523,6 +544,7 @@ class SettingsActivity : Activity() {
             .putInt("context_window_tokens", contextWindow ?: 0)
             .putInt("context_window_$contextWindowKey", contextWindow ?: 0)
             .putString("approval_mode", approvalMode.key)
+            .putString("local_data_mode", localDataMode.name)
             .putBoolean("enable_shell", shellEnabled)
             .remove("had_secret").commit()
         if (!saved) {

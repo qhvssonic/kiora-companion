@@ -16,4 +16,8 @@ internal class ScanMarkdownHandoff(private val referenceIds: Set<String>) {
     fun validationError(): String? = if (markdownPath == null)
         "请先用本机 write 工具将校对后的扫描原文整理为 .md 文件，再将该文件交给 A2A；不要把扫描原图交给远端代写。"
     else null
+
+    fun validateFileIds(ids: List<String>) {
+        require(ids.none { it in referenceIds }) { "扫描原图仅用于本地校对，请发送整理后的 Markdown 文件" }
+    }
 }

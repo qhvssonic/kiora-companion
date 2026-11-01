@@ -157,7 +157,8 @@ class MainActivity : Activity() {
         window.statusBarColor = BG
         window.navigationBarColor = BG
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-        agent = CompanionAgent(this, ::confirmTool, ::showDelta, { status.text = it }, ::showToolEvent)
+        agent = CompanionAgent(this, ::confirmTool, ::showDelta, { status.text = it }, ::showToolEvent,
+            ::confirmDataEgress)
         buildUi()
         composer.setText(savedInstanceState?.getString("composer_draft").orEmpty())
         showAttachments()
@@ -1461,10 +1462,16 @@ class MainActivity : Activity() {
                         }
                     },
                     onLevel = { if (generation == voiceGeneration) onVoiceLevel(it) },
-                    onPartial = { if (generation == voiceGeneration) draftRenderer.submit(it) },
+                    onPartial = {
+                        if (generation == voiceGeneration) {
+                            if (it.isNotBlank()) agent.markLocalInput(requireNotNull(currentConversationId), "语音转写文字")
+                            draftRenderer.submit(it)
+                        }
+                    },
                     onFinalizing = { if (generation == voiceGeneration) showVoiceFinalizing() },
                 )
                 if (generation == voiceGeneration) {
+                    if (text.isNotBlank()) agent.markLocalInput(requireNotNull(currentConversationId), "语音转写文字")
                     draftRenderer.finish(text)
                     status.text = if (text.isBlank()) "未识别到语音，请重试" else
                         "转写完成 · 请核对或修改文字，再点发送"
@@ -1554,7 +1561,7 @@ class MainActivity : Activity() {
     private fun performSend(instruction: String, queueId: String? = null) {
         val files = if (queueId == null) selectedUris.toList() else emptyList()
         val transferFiles = files.filter { it in albumTransferUris }
-        val scanId = scanDraftId.takeIf { queueId == null && instruction.contains("扫描原文：") }
+        val scanId = scanDraftId.takeIf { queueId == null }
         val scanReferenceFiles = files.filter { uri ->
             scanId != null && uri.authority == "$packageName.capture" &&
                 uri.pathSegments.firstOrNull() == "document-drafts" &&
@@ -1827,6 +1834,12 @@ class MainActivity : Activity() {
             val text = data.getStringExtra(DocumentScanActivity.EXTRA_TEXT)?.trim().orEmpty()
             val draft = DocumentDraftStore(this).load(id) ?: run {
                 status.text = "扫描草稿无法读取，请重试"
+                return
+            }
+            val conversationId = currentConversationId ?: return
+            try { agent.markLocalInput(conversationId, "扫描文字与原图") }
+            catch (error: Exception) {
+                status.text = "无法保存扫描资料的处理策略：${error.message}"
                 return
             }
             scanDraftId = id
@@ -2281,6 +2294,27 @@ class MainActivity : Activity() {
             continuation.invokeOnCancellation { runOnUiThread { dialog.dismiss() } }
         }
     }
+
+    private suspend fun confirmDataEgress(request: DataEgressRequest): DataEgressChoice =
+        withContext(Dispatchers.Main) {
+            if (isFinishing || isDestroyed || currentConversationId != request.sessionId)
+                return@withContext DataEgressChoice.DENY
+            suspendCancellableCoroutine { continuation ->
+                val dialog = ToolApprovalSheet.show(this@MainActivity, "允许发送会话资料？", "资料外发",
+                    "接收方：${request.destination}\n\n资料来源：${request.sources.sorted().joinToString("、")}\n\n" +
+                        "可能包含原文、图片、文件名，以及由这些资料生成的回答或摘要。",
+                    "与读取文件的授权分别确认。本会话允许将覆盖后续资料，仅对当前接收方有效；重启或重新配置后失效。",
+                    true) { choice ->
+                    if (continuation.isActive) continuation.resume(if (isFinishing || isDestroyed ||
+                        currentConversationId != request.sessionId) DataEgressChoice.DENY else when (choice) {
+                        ApprovalChoice.ONCE -> DataEgressChoice.ONCE
+                        ApprovalChoice.SESSION -> DataEgressChoice.SESSION
+                        ApprovalChoice.DENY -> DataEgressChoice.DENY
+                    })
+                }
+                continuation.invokeOnCancellation { runOnUiThread { dialog.dismiss() } }
+            }
+        }
 
     private fun approvalMode(): ApprovalMode = ApprovalMode.fromKey(settings.getString("approval_mode", null))
 

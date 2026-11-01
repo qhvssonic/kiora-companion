@@ -35,15 +35,14 @@ class CompanionToolSelectionTest {
         )
     }
 
-    @Test fun pureImageQuestionUsesTheAttachedVisionInputWithoutTools() {
+    @Test fun attachedImageDoesNotRemoveConfiguredTools() {
         val selection = CompanionToolSelection(
             shellEnabled = false,
             hasFolders = false,
             hasGallery = false,
             remoteTools = setOf("a2a_file"),
-            imageOnlyQuestion = true,
         )
-        assertEquals(emptySet<String>(),
+        assertEquals(setOf("read", "write", "edit", "get_local_time", "a2a_file"),
             selection.select(setOf("read", "write", "edit", "get_local_time", "a2a_file")))
     }
 }

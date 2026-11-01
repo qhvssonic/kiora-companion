@@ -31,6 +31,12 @@ internal class GalleryTools(
 
     fun all(): List<AgentTool> = listOf(listTool, readTool)
 
+    suspend fun validatePhoto(photoId: String) = withContext(Dispatchers.IO) {
+        requirePhotoAccess()
+        photoUri(photoId)
+        require(find(photoId) != null) { "相册中未找到这张照片，或已撤销照片授权" }
+    }
+
     private val listTool = object : AgentTool {
         override val definition = ToolDefinition(
             name = "list_gallery_photos",

@@ -9,6 +9,30 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class StreamingVoicePipelineTest {
+    @Test fun resourceWaitDoesNotDelayCaptureAndLeaseIncludesSessionClose() = runBlocking {
+        val coordinator = dev.kiora.core.InferenceCoordinator()
+        val busy = CompletableDeferred<Unit>()
+        val captured = CompletableDeferred<Unit>()
+        val engine = Session()
+        val occupied = launch {
+            coordinator.withInference("other") { busy.complete(Unit); captured.await() }
+        }
+        busy.await()
+        withTimeout(2_000) {
+            StreamingVoicePipeline.transcribe(
+                openSession = { engine },
+                capture = { consume -> captured.complete(Unit); consume(Pcm16Audio(shortArrayOf(1), 16_000)) },
+                onText = {}, onFinalizing = {},
+                coordinate = { block ->
+                    coordinator.withInference("asr", block = block)
+                    assertEquals(1, engine.closes)
+                },
+            )
+        }
+        occupied.join()
+        assertEquals(listOf<Short>(1), engine.samples)
+        assertEquals(1, engine.closes)
+    }
     private class Session : StreamingSpeechSession {
         val samples = mutableListOf<Short>()
         var closes = 0

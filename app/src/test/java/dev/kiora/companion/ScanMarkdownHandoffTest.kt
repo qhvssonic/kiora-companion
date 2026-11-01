@@ -6,6 +6,12 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ScanMarkdownHandoffTest {
+    @Test(expected = IllegalArgumentException::class)
+    fun explicitlySuppliedScanReferenceCannotBypassHostBinding() {
+        val handoff = ScanMarkdownHandoff(setOf("selected:0"))
+        handoff.recordSuccessfulWrite("draft.md")
+        handoff.validateFileIds(listOf("selected:0", "workspace:draft.md"))
+    }
     @Test fun requiresLocalMarkdownBeforeRemoteHandoff() {
         val handoff = ScanMarkdownHandoff(setOf("selected:0"))
         assertNotNull(handoff.validationError())

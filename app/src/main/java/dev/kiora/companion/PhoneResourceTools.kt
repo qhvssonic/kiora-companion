@@ -3,6 +3,7 @@ package dev.kiora.companion
 import dev.kiora.core.AgentTool
 import dev.kiora.core.ToolDefinition
 import dev.kiora.core.ToolOutput
+import dev.kiora.core.ToolArgumentPrevalidator
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -19,13 +20,14 @@ internal class PhoneResourceTools(
     private val workspaceImage: suspend (String) -> ToolOutput? = { null },
     private val selectedFile: suspend (String) -> ToolOutput = { error("No file is selected for this turn") },
     private val normalizeSelectedPath: (String) -> String = { it },
+    private val validateReadPath: suspend (String) -> String? = { null },
 ) {
     private val storageByName = storage.associateBy { it.definition.name }
     private val galleryByName = gallery.associateBy { it.definition.name }
 
     fun all(): List<AgentTool> = listOf(read, browse, manage)
 
-    private val read = object : AgentTool {
+    private val read = object : AgentTool, ToolArgumentPrevalidator {
         override val definition = ToolDefinition(
             "read",
             "Read an existing file or photo needed for the user's task; this is not a general knowledge lookup. " +
@@ -48,6 +50,9 @@ internal class PhoneResourceTools(
         )
 
         override suspend fun execute(arguments: JsonObject): String = executeResult(arguments).text
+
+        override suspend fun validateArguments(arguments: JsonObject): String? =
+            validateReadPath(normalizeSelectedPath(arguments.value("path")))
 
         override suspend fun executeResult(arguments: JsonObject): ToolOutput {
             val path = normalizeSelectedPath(arguments.value("path"))

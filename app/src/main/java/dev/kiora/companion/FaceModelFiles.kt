@@ -63,16 +63,18 @@ internal class FaceModelFiles(context: Context) {
                     "$name 与官方 buffalo_sc 固定版本不匹配"
                 }
             }
-            val engine = InsightFacePort(pending, MODEL_ID)
-            try { engine.prepare() } finally { withContext(NonCancellable) { engine.close() } }
-            currentCoroutineContext().ensureActive()
-            check(pending.renameTo(target))
-            if (!prefs.edit().putString("directory", id).commit()) {
-                target.deleteRecursively(); error("无法保存模型设置")
+            InferenceResources.withInference("face-validate") {
+                val engine = InsightFacePort(pending, MODEL_ID)
+                try { engine.prepare() } finally { withContext(NonCancellable) { engine.close() } }
+                currentCoroutineContext().ensureActive()
+                check(pending.renameTo(target))
+                if (!prefs.edit().putString("directory", id).commit()) {
+                    target.deleteRecursively(); error("无法保存模型设置")
+                }
+                // Keep activation and old-path cleanup inside the same lease as validation.
+                root.listFiles()?.filter { it.isDirectory && it.name != id &&
+                    it.name.matches(Regex("[a-f0-9-]{36}(\\.pending)?")) }?.forEach { it.deleteRecursively() }
             }
-            // No live engine uses these paths: imports run exclusively in FaceActivity.
-            root.listFiles()?.filter { it.isDirectory && it.name != id &&
-                it.name.matches(Regex("[a-f0-9-]{36}(\\.pending)?")) }?.forEach { it.deleteRecursively() }
             return Model(target, MODEL_ID)
         } finally { pending.deleteRecursively() }
     }

@@ -192,31 +192,37 @@ class FaceCameraActivity : Activity(), TextureView.SurfaceTextureListener {
                 // Preserve the cleanup chain even when another quick camera switch cancels this waiter.
                 withContext(NonCancellable) { previous?.join() }
                 currentCoroutineContext().ensureActive()
-                val model = FaceModelFiles(this@FaceCameraActivity).current() ?: error("请先导入人脸模型")
-                engine = InsightFacePort(model.directory, model.id)
-                note.text = "正在准备扫描…"
-                engine.prepare()
-                overlay?.start()
-                val gate = FaceScanGate()
-                for (frame in channel) {
+                InferenceResources.withInference("face-scan") {
                     try {
-                        val input = withContext(Dispatchers.Default) {
-                            FacePreviewFrame.decodeNv21(frame.bytes, frame.width, frame.height, frame.rotation)
+                        val model = FaceModelFiles(this@FaceCameraActivity).current() ?: error("请先导入人脸模型")
+                        val scanningEngine = InsightFacePort(model.directory, model.id).also { engine = it }
+                        note.text = "正在准备扫描…"
+                        scanningEngine.prepare()
+                        overlay?.start()
+                        val gate = FaceScanGate()
+                        for (frame in channel) {
+                            try {
+                                val input = withContext(Dispatchers.Default) {
+                                    FacePreviewFrame.decodeNv21(frame.bytes, frame.width, frame.height, frame.rotation)
+                                }
+                                val observations = scanningEngine.analyze(input)
+                                currentCoroutineContext().ensureActive()
+                                if (!resumed || camera !== active) break
+                                val state = gate.update(observations, input.width, input.height, frame.timeMs)
+                                note.text = state.message; overlay?.updateProgress(state.progress)
+                                if (state.ready != null) {
+                                    capturing = true
+                                    setResult(RESULT_OK, Intent()
+                                        .putExtra(SCAN_MODEL, state.ready.embedding.modelId)
+                                        .putExtra(SCAN_FEATURES, state.ready.embedding.values()))
+                                    finish()
+                                    break
+                                }
+                            } finally { busy = false }
                         }
-                        val observations = engine.analyze(input)
-                        currentCoroutineContext().ensureActive()
-                        if (!resumed || camera !== active) break
-                        val state = gate.update(observations, input.width, input.height, frame.timeMs)
-                        note.text = state.message; overlay?.updateProgress(state.progress)
-                        if (state.ready != null) {
-                            capturing = true
-                            setResult(RESULT_OK, Intent()
-                                .putExtra(SCAN_MODEL, state.ready.embedding.modelId)
-                                .putExtra(SCAN_FEATURES, state.ready.embedding.values()))
-                            finish()
-                            break
-                        }
-                    } finally { busy = false }
+                    } finally {
+                        withContext(NonCancellable) { engine?.close(); engine = null }
+                    }
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {

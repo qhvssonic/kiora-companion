@@ -2,11 +2,14 @@
 
 **English** | [简体中文](README.md)
 
-Kiora Companion is an Android host application built on the [Kiora SDK](https://github.com/qhvssonic/kiora). The current app version is **0.1.103** and uses SDK **`0.3.0-SNAPSHOT`**. It brings on-device models, document scanning, gallery search, local tools, authorization, and A2A collaboration into one conversation. The demonstration uses a computer-hosted DSH agent, but A2A peers are not limited to computers.
+Kiora Companion is an Android host application built on the [Kiora SDK](https://github.com/qhvssonic/kiora). The current app version is **0.1.107** and uses SDK **`0.3.0-SNAPSHOT`**. It brings on-device models, document scanning, gallery search, local tools, authorization, and A2A collaboration into one conversation. The demonstration uses a computer-hosted DSH agent, but A2A peers are not limited to computers.
 
 The code is licensed under [Apache-2.0](LICENSE). Model weights, native AARs, and the DSH plugin have separate upstream licenses.
 
 ## What the app does
+
+- Version 0.1.107 separates local resource access from data egress permission. Settings can require confirmation before local session data reaches an online model or A2A agent, or keep that data on device. Session-level source labels also cover derived answers and summaries. Grants are scoped to the current session and recipient and are cleared on reconfiguration or restart; full tool access does not bypass this policy. The last 30 authorization decisions are available in settings.
+- Tool visibility uses a per-turn capability snapshot rather than image-task keywords. Resource reads are checked before approval. Heavy local inference shares a process-wide coordinator, with safe cleanup before handoff and system low-memory admission checks. Streaming microphone capture still starts independently of model preparation. On 2026-11-01, V2509A permission/voice checks and a 20-round mixed-model test passed after fixing caller-owned bitmap recycling. Sampled process PSS peaked at 3.06 GiB. The Gemma 4 E2B knowledge/tool-routing regression still fails; see [runtime safety](https://github.com/qhvssonic/kiora/blob/main/docs/runtime-safety.md).
 
 - Local face enrollment, multiple samples per person, deletion, 1:N candidate search and face-based photo search are available from the sidebar or settings. Import the official `buffalo_sc` directory separately; its weights are for non-commercial research only. Templates stay in private storage and are never automatically added to chat or uploaded. Gallery indexing respects current photo permissions. Results require user verification; no liveness or calibrated authentication guarantee is provided. See [face integration](https://github.com/qhvssonic/kiora/blob/main/docs/face-recognition.md).
 
@@ -23,6 +26,25 @@ The code is licensed under [Apache-2.0](LICENSE). Model weights, native AARs, an
 - **Read replies aloud offline:** import the pinned MeloTTS directory (FP32 recommended; int8 also supported) in Settings, tap the speaker icon on an assistant reply; reading aloud is a manual action and is not exposed as an agent tool. Playback can be stopped; audio is neither saved nor sent to an A2A peer. FP32 synthesis has been measured on the V2509A; broader device and audio quality validation is pending.
 
 The settings page separates on-device providers from API providers. The chat UI includes conversation search, a model switcher, an attachment composer, tool-call details, Markdown rendering, and image preview with pinch zoom. These are Companion features built on the SDK, not features supplied automatically by `AgentRuntime`.
+
+## Local data and tool boundaries
+
+File-access approval and permission to send data to an online model or A2A recipient are separate. **Settings → Tool authorization → Local data processing** offers:
+
+| Mode | Behavior |
+| --- | --- |
+| Ask before sending (default) | Show the recipient and source categories before marked data leaves the device. Allow the current request, allow the current session/recipient, or deny. Denial stops the run instead of asking the model to retry through another tool. |
+| Keep on device | Block marked session data from reaching online models or A2A peers. Full tool access does not bypass this check. |
+
+Scan text, speech transcripts, selected files/images, and tool results produce source labels persisted by session ID in private `local_data_sources` preferences. This does not create another copy of files or recordings. Editing text, removing a scan label, generating an answer/summary, or restarting the app does not clear the source labels. Older conversations without source metadata are treated conservatively.
+
+This is **session-level inheritance**, not per-passage provenance or automatic detection of sensitive typed text. It constrains marked data rather than disabling all networking. Ordinary typed text still uses the selected model; choose an on-device model for an entirely local conversation.
+
+Session approval covers subsequent data for that recipient within the current Agent instance and is cleared on restart, reconfiguration, or close. Separate A2A connections at the same endpoint do not share approval. Persistent source labels and temporary sending approval are distinct. Settings shows the last 30 authorization decisions, not a delivery log.
+
+Each send snapshots available capabilities and attachment bindings. Image-task keywords do not hide all tools; explicit connection aliases can bind the A2A destination. Before approval, `read` validates attachment IDs, workspace-file existence, and current file/photo access; execution still rechecks permissions. Invalid resources fail before an approval dialog. These checks do not establish the correctness of a model's tool choice or answer.
+
+Chat, ASR, TTS, OCR, embedding, and face inference share a resource coordinator and wait for native cleanup before handoff. Chat weights can remain resident. This limits concurrency and checks system low-memory state, not a fixed memory ceiling. Scan originals remain local references when delivering a generated Markdown document; receiving remote A2A files remains unimplemented. See [runtime safety and device validation](https://github.com/qhvssonic/kiora/blob/main/docs/runtime-safety.md).
 
 ## Models and local data
 
@@ -61,7 +83,7 @@ The settings page checks the Agent Card and advertised task endpoint when opened
 
 For each local conversation and remote connection, Companion reuses the `contextId` returned by the peer so later completed tasks can share remote context. An unfinished task is resumed with its `taskId`. Keeping these identifiers separate avoids creating unrelated remote conversations when the user refers to “the previous file.” A2A needs a reachable network; on-device scanning, OCR, gallery indexing, and local model use can run without a remote connection when their models and data are already present.
 
-The tool authorization settings offer three modes: ask for each call; the default mode, which automatically permits configured read-only local tools but asks before modification, commands, or uploads; and full access to configured tools. The OS permission boundary still applies in every mode. API keys and A2A Bearer Tokens are encrypted separately using Android Keystore before app-private persistence. If an online chat model is selected, prompts and some tool-returned metadata may be sent to that provider; local indexing does not make the entire app offline in every configuration.
+The tool authorization settings offer three modes: ask for each call; the default mode, which automatically permits configured read-only local tools but asks before modification, commands, or uploads; and full access to configured tools. The OS permission and separate data-egress checks still apply. API keys and A2A Bearer Tokens are encrypted separately using Android Keystore before app-private persistence. Ordinary typed prompts use the selected model; marked local results require the data-egress policy to allow transmission. Local indexing does not make every configuration entirely offline.
 
 ### Connecting to a DSH A2A service
 

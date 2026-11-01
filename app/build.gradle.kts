@@ -11,8 +11,8 @@ android {
         applicationId = "dev.kiora.companion"
         minSdk = 26
         targetSdk = 34
-        versionCode = 107
-        versionName = "0.1.106"
+        versionCode = 108
+        versionName = "0.1.107"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         if (providers.gradleProperty("ocrCompareArm64Only").isPresent) {
             ndk.abiFilters += "arm64-v8a"

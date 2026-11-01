@@ -143,6 +143,10 @@ class FaceActivity : Activity() {
         CoroutineScope(Dispatchers.IO).launch { running?.join(); store.close() }
         super.onDestroy()
     }
+    override fun onStop() {
+        work?.cancel()
+        super.onStop()
+    }
     private suspend fun refresh() {
         val model = models.current()
         val data = withContext(Dispatchers.IO) {
@@ -185,10 +189,13 @@ class FaceActivity : Activity() {
             }
         }
     }
-    private suspend fun <T> withEngine(block: suspend (InsightFacePort) -> T): T {
+    private suspend fun <T> withEngine(
+        priority: dev.kiora.core.InferencePriority = dev.kiora.core.InferencePriority.INTERACTIVE,
+        block: suspend (InsightFacePort) -> T,
+    ): T = InferenceResources.withInference("face", priority) {
         val model = models.current() ?: error("请先导入人脸模型")
         val engine = InsightFacePort(model.directory, model.id)
-        try { return block(engine) } finally { withContext(NonCancellable) { engine.close() } }
+        try { block(engine) } finally { withContext(NonCancellable) { engine.close() } }
     }
     private fun confirmImport() {
         SettingsSheet.showConfirmation(this, "导入人脸模型",
@@ -379,7 +386,7 @@ class FaceActivity : Activity() {
     }
     private fun indexPhotos() = perform {
         clearResults(); status.text = "正在读取已授权照片…"
-        withEngine { engine ->
+        withEngine(dev.kiora.core.InferencePriority.BATCH) { engine ->
             val photos = withContext(Dispatchers.IO) { AlbumPhotoCatalog.scan(this@FaceActivity) }
             val versions = withContext(Dispatchers.IO) {
                 store.retainCurrent(engine.modelId, photos.associate { it.id to (it.modifiedSeconds to it.sizeBytes) })

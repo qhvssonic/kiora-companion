@@ -26,38 +26,35 @@ class CompanionToolSelectionTest {
         assertTrue(isLowRiskTool(AlbumSearchTool.NAME))
     }
 
-    @Test fun desktopRequestKeepsA2aAndWorkspaceToolsButHidesPhoneShell() {
+    @Test fun configuredShellIsIndependentOfTaskPhrasing() {
         val selected = CompanionToolSelection(shellEnabled = true, hasFolders = false,
-            hasGallery = false, remoteTools = setOf(remoteTool),
-            remoteAgentRequested = true).select(available)
+            hasGallery = false, remoteTools = setOf(remoteTool)).select(available)
 
         assertTrue(remoteTool in selected)
         assertTrue("read" in selected)
         assertTrue("write" in selected)
-        assertFalse("shell" in selected)
-    }
-
-    @Test fun explicitPhoneShellRequestCanStillUseShell() {
-        val selected = CompanionToolSelection(shellEnabled = true, hasFolders = false,
-            hasGallery = false, remoteTools = setOf(remoteTool),
-            remoteAgentRequested = true, phoneShellRequested = true).select(available)
-
         assertTrue("shell" in selected)
     }
 
-    @Test fun disconnectedDesktopRequestDoesNotFallBackToPhoneShell() {
+    @Test fun explicitlyBoundRemoteTargetCannotUsePhoneShell() {
         val selected = CompanionToolSelection(shellEnabled = true, hasFolders = false,
-            hasGallery = false, remoteTools = emptySet(),
-            remoteAgentRequested = true).select(available)
+            hasGallery = false, remoteTools = setOf(remoteTool), remoteTargetSelected = true).select(available)
 
         assertFalse("shell" in selected)
     }
 
-    @Test fun routingRecognizesDesktopIntentWithoutMatchingOrdinarySending() {
-        assertTrue(RemoteTaskRouting.requestsRemoteAgent("通过 DSH 把工作区文件发送到电脑端"))
-        assertFalse(RemoteTaskRouting.requestsPhoneShell("通过 DSH 把工作区文件发送到电脑端"))
-        assertFalse(RemoteTaskRouting.requestsRemoteAgent("发送短信"))
-        assertTrue(RemoteTaskRouting.requestsPhoneShell("先在手机上运行命令，再交给 DSH"))
+    @Test fun unavailableRemoteTargetDoesNotFallBackToPhoneShell() {
+        val selected = CompanionToolSelection(shellEnabled = true, hasFolders = false,
+            hasGallery = false, remoteTools = emptySet(), remoteTargetSelected = true).select(available)
+
+        assertFalse("shell" in selected)
+    }
+
+    @Test fun genericTaskWordsDoNotSelectAConnection() {
+        val profile = A2aConnectionConfig("id", "Business Agent", "http://localhost/card", alias = "business")
+        listOf("保存照片", "发送短信", "远程医疗是什么意思", "电脑端有什么软件").forEach {
+            assertTrue(RemoteTaskRouting.matchingConnections(it, listOf(profile)).isEmpty())
+        }
     }
 
     @Test fun aliasSelectsOneConnectionAndProducesRemoteOnlyInstruction() {

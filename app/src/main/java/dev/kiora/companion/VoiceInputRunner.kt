@@ -30,6 +30,7 @@ internal class VoiceInputRunner(private val context: Context) {
                     },
                     onText = { text -> withContext(Dispatchers.Main) { onPartial(text) } },
                     onFinalizing = { withContext(Dispatchers.Main) { onFinalizing() } },
+                    coordinate = { block -> InferenceResources.withInference("asr-stream", block = block) },
                 )
             } else {
                 val files = VoiceModelFiles(context)
@@ -42,9 +43,11 @@ internal class VoiceInputRunner(private val context: Context) {
                 }
                 withContext(Dispatchers.Main) { onFinalizing() }
                 currentCoroutineContext().ensureActive()
-                SenseVoiceRecognizer(files.model, files.tokens).use {
-                    currentCoroutineContext().ensureActive()
-                    it.transcribe(Pcm16Audio(audio.copyOf(count), PushToTalkRecorder.SAMPLE_RATE)).text
+                InferenceResources.withInference("asr") {
+                    SenseVoiceRecognizer(files.model, files.tokens).use {
+                        currentCoroutineContext().ensureActive()
+                        it.transcribe(Pcm16Audio(audio.copyOf(count), PushToTalkRecorder.SAMPLE_RATE)).text
+                    }
                 }
             }
         }

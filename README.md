@@ -2,15 +2,20 @@
 
 [English](README.en.md) | **简体中文**
 
-独立的 Android 应用，作为宿主集成 [Kiora SDK](https://github.com/qhvssonic/kiora)。当前应用版本为 0.1.103，依赖 SDK `0.3.0-SNAPSHOT`。它展示移动端智能体的完整流程：选择 LiteRT-LM 或 MNN 本机模型，在手机扫描与整理多页资料、检索相册，再按用户授权通过 A2A 将任务和文件交给其他 Agent；本次演示连接电脑端 DSH。应用也支持兼容在线模型 API，界面提供可搜索的会话侧边栏、顶部模型选择入口和底部附件输入区。
+独立的 Android 应用，作为宿主集成 [Kiora SDK](https://github.com/qhvssonic/kiora)。当前应用版本为 0.1.107，依赖 SDK `0.3.0-SNAPSHOT`。它展示移动端智能体的完整流程：选择 LiteRT-LM 或 MNN 本机模型，在手机扫描与整理多页资料、检索相册，再按用户授权通过 A2A 将任务和文件交给其他 Agent；本次演示连接电脑端 DSH。应用也支持兼容在线模型 API，界面提供可搜索的会话侧边栏、顶部模型选择入口和底部附件输入区。
 
 许可证：[Apache-2.0](LICENSE)。上游模型、Android AAR 和 DSH 插件分别遵循其各自的许可证。
 
 ## 功能
 
+2026-11-01 在 V2509A / Android 16 覆盖安装 0.1.107，来源/授权和语音相关 8 项设备回归通过；修复 SDK Embedding 图片所有权后，20 轮混合模型循环通过（另 1 项）。进程 PSS 采样最高约 3.06 GiB。Gemma 4 E2B 的知识与工具选择回归仍失败；详细条件和未通过项见 SDK [真机记录](https://github.com/qhvssonic/kiora/blob/main/docs/runtime-safety.md#2026-11-01-真机验证)。
+
+- 0.1.107 增加本地资料处理设置、独立外发确认和最近 30 条授权记录，详见下方“本地资料与工具边界”。
+- 工具按每次发送时的能力与权限快照提供；重型本地推理共享资源协调，等待安全释放后交接。流式语音仍支持先收音、有界缓存。实现及验收边界见 SDK [运行策略与资源管理](https://github.com/qhvssonic/kiora/blob/main/docs/runtime-safety.md)。
+
 - 在设置页选择 DeepSeek、OpenAI、LiteRT-LM 本地模型、MNN 本地模型或其他兼容服务。聊天顶部显示当前模型；云端预置模型可直接切换。
 - LiteRT-LM 可导入 `.litertlm` 文件并选择 CPU/GPU。MNN 可导入包含 `config.json`、权重和 tokenizer 的整个模型目录；两种模型都复制到应用私有存储，并在 Companion 进程中推理，无需 MNN Chat 应用或本机 API 服务。MNN 支持文本与流式输出；包含视觉配置、`visual.mnn` 和 `visual.mnn.weight` 的模型可接收图片。工具选择通过受限 JSON 提示协议实现；原生库目前只打包 arm64-v8a。
-- 相册检索使用 SDK 的 EmbeddingGemma 2 适配器。首次使用时，在「设置 → 手机文件与相册」导入官方文字＋视觉 440M `.litertlm` 模型，通过已有的「相册访问」入口授予完整相册或系统选定照片的读取权限，并在设置中分批建立索引，每批最多 100 张。之后直接在聊天中描述想找的照片；首页和侧边栏的「搜索本地相册」会在输入框填入“搜索相册中的图片：”，供用户补充条件后发送。Agent 调用只读 `search_album_photos`，最多返回 3 张排序候选；单张照片直接展示，多张照片默认叠放，可展开逐张查看和放大，不会把已索引总数当作匹配数。仅当用户要求分析照片内容时，Agent 才需要调用 `read(gallery:gallery_<数字ID>)`，将该照片交给视觉模型。索引位于应用私有 SQLite 数据库，只保存照片 ID、版本信息和向量，原图仍由系统相册管理；搜索前会剔除当前已不可访问或已修改照片的旧向量。搜索不会自动扫描或上传照片；若聊天使用云端模型，查询文字及工具返回的照片名称会进入该模型的请求。模型不进入仓库或 APK；模型文件说明及 SHA-256 见 SDK 的 `docs/embeddinggemma2-integration.md`。
+- 相册检索使用 SDK 的 EmbeddingGemma 2 适配器。首次使用时，在「设置 → 手机文件与相册」导入官方文字＋视觉 440M `.litertlm` 模型，通过已有的「相册访问」入口授予完整相册或系统选定照片的读取权限，并在设置中分批建立索引，每批最多 100 张。之后直接在聊天中描述想找的照片；首页和侧边栏的「搜索本地相册」会在输入框填入“搜索相册中的图片：”，供用户补充条件后发送。Agent 调用只读 `search_album_photos`，最多返回 3 张排序候选；单张照片直接展示，多张照片默认叠放，可展开逐张查看和放大，不会把已索引总数当作匹配数。仅当用户要求分析照片内容时，Agent 才需要调用 `read(gallery:gallery_<数字ID>)`，将该照片交给视觉模型。索引位于应用私有 SQLite 数据库，只保存照片 ID、版本信息和向量，原图仍由系统相册管理；搜索前会剔除当前已不可访问或已修改照片的旧向量。搜索不会自动扫描或上传照片；查询文字使用所选模型；本地工具返回的照片名称及派生信息须通过外发策略后才会进入在线模型请求。模型不进入仓库或 APK；模型文件说明及 SHA-256 见 SDK 的 `docs/embeddinggemma2-integration.md`。
 
 Android 不允许应用直接读取另一个应用的 `Android/data` 目录。已有模型若存放在那里，先移到系统文件选择器可见的位置再导入；调试时也可以通过 ADB 复制到 Kiora 的私有 `files/models` 目录，设置页会自动发现该目录中的 `.litertlm` 文件。MNN 模型可通过目录选择器导入；调试时完整复制到私有 `files/mnn-models/<模型目录>/` 后，设置页也会发现其中的 `config.json`。
 - 相册搜索结果可展开并勾选要发送的照片；单张结果可直接点「发送到电脑」。选择已启用且设有触发别名的 A2A 连接后，照片先加入输入框附件，默认指令为保存到电脑桌面，用户可修改并点击发送。此路径把照片当作文件附件，不占用本机模型的单图视觉输入名额；实际上传仍遵循 A2A 工具授权与合计 10 MiB 限制。
@@ -45,6 +50,27 @@ Android 不允许应用直接读取另一个应用的 `Android/data` 目录。�
 在 DSH `@ryubyte/dsh-a2a` 的「对外服务」中创建 Agent，默认端点路径为 `/a2a`。保存并上线后，复制完整的 Agent Card URL，在 Companion 设置的「连接的 A2A Agent」中添加；手机与电脑应能通过该 URL 互访。若 DSH 开启入站 Bearer 鉴权，在 Companion 对应连接中填同一令牌。DSH 的 Base URL 应指向手机可访问的电脑地址；仅当自动推断的地址可从手机访问时才可留空。`localhost` 和 `127.0.0.1` 在手机上指向手机自己。
 
 安装版 `@ryubyte/dsh-a2a` 0.3.1 默认忽略 raw 文件 Part。本仓库 `scripts/patch-dsh-a2a-attachment-bridge.mjs` 在入站执行器调用 DSH Agent 前校验并暂存附件，仅把用户指令与本地文件路径、MIME、大小和 SHA-256 交给模型；文件的保存目标或分析方式仍由 DSH Agent 按用户指令决定。`scripts/configure-dsh-a2a-delegate.mjs` 配置通用 `delegate_task` 技能及文件输入类型，保留原 Bearer Token 和出站连接。本机的独立副本、原版与桥接版快照、设计及升级说明保存在仓库外的 `../DSH-A2A-通用附件桥接/`；插件升级后须先核对新版本，再移植补丁。这些 DSH 脚本不属于 Companion 的构建步骤。
+
+## 本地资料与工具边界
+
+读取文件的授权与把内容发送给在线模型或 A2A 接收方的授权分别处理。“设置 → 工具授权 → 本地资料处理”提供两种方式：
+
+| 设置 | 行为 |
+| --- | --- |
+| 外发前询问（默认） | 已标记的本地资料将进入在线模型或 A2A 请求前，显示接收方和来源类别；可允许一次、本会话允许或拒绝。拒绝会结束本轮，不让模型继续换工具重试。 |
+| 仅在本机处理 | 阻止已标记的会话资料外发。“完全访问权限”仍不能绕过这项设置。 |
+
+扫描文字、语音转写、已选文件/图片和工具结果会产生来源标签，按会话 ID 持久保存在应用私有 `local_data_sources` 配置中；它不额外复制文件或原始录音。修改转写、删除“扫描原文”文字或生成回答/摘要都不会清除标签；重启后仍保留。旧会话缺少来源信息时保守标记为历史资料。
+
+这是**会话级的来源继承**，没有逐段追踪哪个句子来自哪个文件，也不自动识别键入文字中的隐私信息。该设置约束已标记资料，不是全局断网开关；普通键入文字仍由所选模型处理，完全本机对话应选择本机模型。
+
+本会话允许覆盖当前接收方的后续资料，仅在当前 Agent 实例内有效；重启、重新配置或关闭后失效。同一服务器上的不同 A2A 连接不共享批准。来源标签与外发批准是不同状态：标签持久保存，批准不跨重启保留。设置页显示最近 30 条授权决定，记录时间、接收方和来源类别，不代表实际发送成功。
+
+每次发送时固定可用工具和本轮附件绑定，不按“保存、上传”等任务关键词隐藏图片场景工具；明确的连接别名用于绑定 A2A 目的地。`read` 在授权前检查附件序号、工作区文件存在性、授权文件和照片访问权限，执行时继续核验权限。不存在的资源返回参数错误，不先弹出允许访问的对话框。检查保证资源与权限边界，**不能保证模型的工具选择或知识回答正确**。
+
+聊天模型、ASR、TTS、OCR、Embedding 和人脸推理共用资源协调，取消后等待原生清理再交接；聊天权重可继续驻留。它控制并发并检查系统低内存状态，没有承诺固定内存上限。扫描原图只作本地校对参考；需要发送扫描成品时先生成并核验 Markdown。A2A 返回文件接收仍未实现。
+
+接口、Bitmap 所有权修复、测试条件和已知失败项见 SDK [运行策略与真机验证](https://github.com/qhvssonic/kiora/blob/main/docs/runtime-safety.md)。
 
 ## 本地人脸
 
@@ -82,7 +108,7 @@ Android 不允许应用直接读取另一个应用的 `Android/data` 目录。�
 
 ## 构建与运行
 
-需要 JDK 17、Android SDK（`compileSdk 35`），以及与本仓库同级检出的 `kiora` SDK。先在 `../kiora` 发布 SDK 0.3.0-SNAPSHOT 到本机 Maven。Paddle OCR 适配器还需要按 SDK 的 OCR 文档构建官方 AAR；若 AAR 不在脚本的默认路径，给 `install-paddle-ocr.ps1` 传入 `-Aar` 绝对路径。SenseVoice、Paraformer 与 MeloTTS 模型权重不进入仓库或 APK，运行时由用户导入。MeloTTS 的固定修订、模型准备脚本和验收边界见 SDK 的 [离线语音合成](../kiora/docs/speech-synthesis.md)。
+需要 JDK 17、Android SDK（`compileSdk 35`），以及与本仓库同级检出的 `kiora` SDK。先在 `../kiora` 发布 SDK 0.3.0-SNAPSHOT 到本机 Maven。Paddle OCR 适配器还需要按 SDK 的 OCR 文档构建官方 AAR；若 AAR 不在脚本的默认路径，给 `install-paddle-ocr.ps1` 传入 `-Aar` 绝对路径。SenseVoice、Paraformer 与 MeloTTS 模型权重不进入仓库或 APK，运行时由用户导入。MeloTTS 的固定修订、模型准备脚本和验收边界见 SDK 的 [离线语音合成](https://github.com/qhvssonic/kiora/blob/main/docs/speech-synthesis.md)。
 
 ```powershell
 cd ..\kiora

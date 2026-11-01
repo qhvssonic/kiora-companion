@@ -65,8 +65,10 @@ internal class StreamingVoiceModelFiles(context: Context) {
                     "$name 与支持的 Paraformer 中英双语 int8 版本不匹配"
                 }
             }
-            val session = StreamingParaformerRecognizer(pending).openSession()
-            withContext(NonCancellable) { session.close() }
+            InferenceResources.withInference("asr-validate") {
+                val session = StreamingParaformerRecognizer(pending).openSession()
+                withContext(NonCancellable) { session.close() }
+            }
             currentCoroutineContext().ensureActive()
             check(pending.renameTo(target))
             if (!prefs.edit().putString("directory", id).commit()) {

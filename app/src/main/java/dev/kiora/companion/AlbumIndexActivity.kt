@@ -85,14 +85,17 @@ class AlbumIndexActivity : Activity() {
         val running = work
         running?.cancel()
         scope.cancel()
-        val active = port
-        port = null
         CoroutineScope(Dispatchers.IO).launch {
             running?.join()
-            active?.close()
+            port?.close()
+            port = null
             index.close()
         }
         super.onDestroy()
+    }
+    override fun onStop() {
+        work?.cancel()
+        super.onStop()
     }
 
     private fun buildUi() {
@@ -278,29 +281,40 @@ class AlbumIndexActivity : Activity() {
         val versions = withContext(Dispatchers.IO) { index.versions(modelId) }
         val changed = visible.filter { versions[it.id] != (it.modifiedSeconds to it.sizeBytes) }
             .take(100)
-        val engine = if (changed.isEmpty()) null else requirePort(modelId)
         var added = 0
         var updated = 0
         var failed = 0
         try {
             val cleanup = withContext(Dispatchers.IO) { index.retainCurrent(modelId, visible.associate { it.id to
                 (it.modifiedSeconds to it.sizeBytes) }) }
-            engine?.prepare()
-            changed.forEachIndexed { position, photo ->
-                currentCoroutineContext().ensureActive()
-                try {
-                    val bitmap = withContext(Dispatchers.IO) { loadThumbnail(photo.id) }
+            changed.chunked(5).forEachIndexed { batchIndex, batch ->
+                InferenceResources.withInference("album-index", dev.kiora.core.InferencePriority.BATCH) {
+                    val engine = requirePort(modelId)
                     try {
-                        val vector = requireNotNull(engine).embedBitmap(bitmap)
-                        withContext(Dispatchers.IO) { index.put(modelId, photo, vector) }
-                        if (photo.id in versions) updated++ else added++
-                    } finally { bitmap.recycle() }
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) { failed++ }
-                if (position % 5 == 0) {
-                    activityNote = "已处理 ${position + 1}/${changed.size} 张…"
-                    indexStatus.text = activityNote
+                        engine.prepare()
+                        batch.forEachIndexed { batchPosition, photo ->
+                            val position = batchIndex * 5 + batchPosition
+                            currentCoroutineContext().ensureActive()
+                            try {
+                                val bitmap = withContext(Dispatchers.IO) { loadThumbnail(photo.id) }
+                                try {
+                                    val vector = engine.embedBitmap(bitmap)
+                                    withContext(Dispatchers.IO) { index.put(modelId, photo, vector) }
+                                    if (photo.id in versions) updated++ else added++
+                                } finally { bitmap.recycle() }
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (_: Exception) { failed++ }
+                            if (position % 5 == 0) {
+                                activityNote = "已处理 ${position + 1}/${changed.size} 张…"
+                                indexStatus.text = activityNote
+                            }
+                        }
+                    } finally {
+                        withContext(NonCancellable) {
+                            try { engine.close() } finally { port = null }
+                        }
+                    }
                 }
             }
             val indexedTotal = withContext(Dispatchers.IO) { index.count(modelId) }

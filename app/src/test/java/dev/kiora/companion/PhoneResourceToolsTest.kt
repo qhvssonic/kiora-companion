@@ -14,6 +14,30 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PhoneResourceToolsTest {
+    @Test fun invalidResourceIsRejectedBeforeAuthorizationAndExecution() = runBlocking {
+        var approvals = 0
+        var reads = 0
+        val underlying = object : AgentTool {
+            override val definition = ToolDefinition("read", "read", JsonObject(emptyMap()))
+            override suspend fun execute(arguments: JsonObject): String { reads++; return "private" }
+        }
+        val read = PhoneResourceTools(underlying, emptyList(), emptyList(),
+            validateReadPath = { "This resource does not exist" }).all().first()
+        var modelCalls = 0
+        val model = object : dev.kiora.core.ModelPort {
+            override suspend fun respond(messages: List<AgentMessage>, tools: List<ToolDefinition>) =
+                if (modelCalls++ == 0) AgentMessage.Assistant("", listOf(dev.kiora.core.ToolCall("r", "read",
+                    args("path" to "workspace:invented.txt")))) else AgentMessage.Assistant("Choose an existing file")
+        }
+        val store = dev.kiora.core.InMemorySessionStore()
+        dev.kiora.core.AgentRuntime(model, listOf(read), store, {
+            approvals++; dev.kiora.core.ToolAuthorization.Allowed
+        }).run("s", "Read")
+        assertEquals(0, approvals)
+        assertEquals(0, reads)
+        assertEquals(dev.kiora.core.ToolFailureKind.INVALID_ARGUMENTS, store.load("s")!!.activeMessages()
+            .filterIsInstance<AgentMessage.ToolResult>().single().failureKind)
+    }
     private data class Call(val name: String, val arguments: JsonObject)
     private val calls = mutableListOf<Call>()
 
