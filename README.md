@@ -4,7 +4,7 @@
 
 **An Android agent app for local documents, photos, voice, and A2A collaboration.**
 
-Built with [Kiora SDK](https://github.com/qhvssonic/kiora) · App 0.1.108 · Android 8.0+
+Built with [Kiora SDK](https://github.com/qhvssonic/kiora) · Preview APK 0.1.108 · Android 8.0+
 
 **English** | [简体中文](README.zh-CN.md)
 
@@ -97,6 +97,8 @@ A2A setup is optional. Add an Agent Card URL in settings only when you have a re
 
 ## Status and roadmap
 
+Current source **0.1.109** reuses a ready chat model across settings and other screens. A2A retries and context-budget changes no longer unconditionally reload model weights; changing the actual model/backend still replaces the instance. See [lifecycle and validation](docs/model-lifecycle.md). The downloadable preview linked above remains 0.1.108 until the next release.
+
 **Local validation, 2026-11-03:** 67 Companion JVM tests and the 0.1.108 debug build passed. Earlier V2509A / Android 16 testing covered source/approval flows, voice lifecycle, and 20 mixed-model rounds. Those are scoped observations, not universal device support or a guarantee of model accuracy.
 
 Known limits:
@@ -120,6 +122,6 @@ Next steps:
 - SDK capability guides: [OCR](https://github.com/qhvssonic/kiora/blob/main/docs/document-ocr.md), [speech recognition](https://github.com/qhvssonic/kiora/blob/main/docs/speech-recognition.md), [speech synthesis](https://github.com/qhvssonic/kiora/blob/main/docs/speech-synthesis.md), [photo embeddings](https://github.com/qhvssonic/kiora/blob/main/docs/embeddinggemma2-integration.md), [face recognition](https://github.com/qhvssonic/kiora/blob/main/docs/face-recognition.md).
 - [Report a bug or suggest a workflow](https://github.com/qhvssonic/kiora-companion/issues). Include device/Android version, app version, model/backend, steps, and redacted logs. Do not attach private documents, face data, or credentials.
 
-If Companion helps you explore on-device agents, a star helps others find the project. Contributions to setup docs, translations, and reproducible device reports are welcome.
+If Companion helps you explore on-device agents, a star helps others find the project. Contributions to setup docs, translations, and reproducible device reports are welcome; see [contributing](CONTRIBUTING.md). The issue chooser includes bug reports, device/model reports and workflow ideas.
 
 Source code: [Apache-2.0](LICENSE). Models and native dependencies have separate upstream terms.

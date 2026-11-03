@@ -4,7 +4,7 @@
 
 **在 Android 上用本地模型处理文档、照片和语音，并通过 A2A 与其他智能体协作。**
 
-基于 [Kiora SDK](https://github.com/qhvssonic/kiora) · 应用 0.1.108 · Android 8.0+
+基于 [Kiora SDK](https://github.com/qhvssonic/kiora) · 预览 APK 0.1.108 · Android 8.0+
 
 [English](README.md) | **简体中文**
 
@@ -97,6 +97,8 @@ A2A 是可选配置。有可访问的对端后，再在设置中添加 Agent Car
 
 ## 当前状态与计划
 
+当前源码 **0.1.109** 在设置和其他页面往返时复用已就绪聊天模型；A2A 重试或上下文预算变更不再无条件重载权重，实际更换模型/后端时仍会替换实例。见[生命周期与验证说明](docs/model-lifecycle.md)。上方可下载预览版仍为 0.1.108，等待下一次发布更新。
+
 **2026-11-03 本地验证**：Companion 67 项 JVM 测试和 0.1.108 调试构建通过。此前在 V2509A / Android 16 上覆盖了来源/授权、语音生命周期和 20 轮混合模型循环。这些是限定条件下的记录，不代表所有设备兼容或模型准确率保证。
 
 已知限制：
@@ -120,6 +122,6 @@ A2A 是可选配置。有可访问的对端后，再在设置中添加 Agent Car
 - SDK 能力说明：[OCR](https://github.com/qhvssonic/kiora/blob/main/docs/document-ocr.md)、[语音识别](https://github.com/qhvssonic/kiora/blob/main/docs/speech-recognition.md)、[语音合成](https://github.com/qhvssonic/kiora/blob/main/docs/speech-synthesis.md)、[图片向量](https://github.com/qhvssonic/kiora/blob/main/docs/embeddinggemma2-integration.md)、[人脸](https://github.com/qhvssonic/kiora/blob/main/docs/face-recognition.md)。
 - [提交问题或场景建议](https://github.com/qhvssonic/kiora-companion/issues)：请提供设备/Android 版本、应用版本、模型/后端、复现步骤和脱敏日志，不附私人文档、人脸资料或凭据。
 
-如果 Companion 帮你探索了端侧智能体，欢迎 Star，让更多人发现它。也欢迎改进准备流程、翻译文档和提交可复现的设备记录。
+如果 Companion 帮你探索了端侧智能体，欢迎 Star，让更多人发现它。也欢迎改进准备流程、翻译文档和提交可复现的设备记录，见[贡献指南](CONTRIBUTING.md)。Issue 入口提供问题反馈、设备/模型记录和实际任务建议三类表单。
 
 代码采用 [Apache-2.0](LICENSE)，模型和原生依赖遵循各自上游许可。
