@@ -1,166 +1,115 @@
+<p align="center"><img src="app/src/main/res/drawable/kiora_logo.png" alt="Kiora Companion" width="120"></p>
+
 # Kiora Companion
 
-[English](README.en.md) | **简体中文**
+**An Android agent app for local documents, photos, voice, and A2A collaboration.**
 
-独立的 Android 应用，作为宿主集成 [Kiora SDK](https://github.com/qhvssonic/kiora)。当前应用版本为 0.1.107，依赖 SDK `0.3.0-SNAPSHOT`。它展示移动端智能体的完整流程：选择 LiteRT-LM 或 MNN 本机模型，在手机扫描与整理多页资料、检索相册，再按用户授权通过 A2A 将任务和文件交给其他 Agent；本次演示连接电脑端 DSH。应用也支持兼容在线模型 API，界面提供可搜索的会话侧边栏、顶部模型选择入口和底部附件输入区。
+Built with [Kiora SDK](https://github.com/qhvssonic/kiora) · App 0.1.108 · Android 8.0+
 
-许可证：[Apache-2.0](LICENSE)。上游模型、Android AAR 和 DSH 插件分别遵循其各自的许可证。
+**English** | [简体中文](README.zh-CN.md)
 
-## 功能
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-2026-11-01 在 V2509A / Android 16 覆盖安装 0.1.107，来源/授权和语音相关 8 项设备回归通过；修复 SDK Embedding 图片所有权后，20 轮混合模型循环通过（另 1 项）。进程 PSS 采样最高约 3.06 GiB。Gemma 4 E2B 的知识与工具选择回归仍失败；详细条件和未通过项见 SDK [真机记录](https://github.com/qhvssonic/kiora/blob/main/docs/runtime-safety.md#2026-11-01-真机验证)。
+[What you can do](#what-you-can-do) · [Get started](#get-started) · [Build guide](docs/app-guide.en.md#build-and-run) · [Kiora SDK](https://github.com/qhvssonic/kiora) · [Feedback](https://github.com/qhvssonic/kiora-companion/issues)
 
-- 0.1.107 增加本地资料处理设置、独立外发确认和最近 30 条授权记录，详见下方“本地资料与工具边界”。
-- 工具按每次发送时的能力与权限快照提供；重型本地推理共享资源协调，等待安全释放后交接。流式语音仍支持先收音、有界缓存。实现及验收边界见 SDK [运行策略与资源管理](https://github.com/qhvssonic/kiora/blob/main/docs/runtime-safety.md)。
+Scan a document, find a photo by description, dictate a message, or listen to a reply using local models. When a task needs another agent, connect over A2A and approve what leaves the phone.
 
-- 在设置页选择 DeepSeek、OpenAI、LiteRT-LM 本地模型、MNN 本地模型或其他兼容服务。聊天顶部显示当前模型；云端预置模型可直接切换。
-- LiteRT-LM 可导入 `.litertlm` 文件并选择 CPU/GPU。MNN 可导入包含 `config.json`、权重和 tokenizer 的整个模型目录；两种模型都复制到应用私有存储，并在 Companion 进程中推理，无需 MNN Chat 应用或本机 API 服务。MNN 支持文本与流式输出；包含视觉配置、`visual.mnn` 和 `visual.mnn.weight` 的模型可接收图片。工具选择通过受限 JSON 提示协议实现；原生库目前只打包 arm64-v8a。
-- 相册检索使用 SDK 的 EmbeddingGemma 2 适配器。首次使用时，在「设置 → 手机文件与相册」导入官方文字＋视觉 440M `.litertlm` 模型，通过已有的「相册访问」入口授予完整相册或系统选定照片的读取权限，并在设置中分批建立索引，每批最多 100 张。之后直接在聊天中描述想找的照片；首页和侧边栏的「搜索本地相册」会在输入框填入“搜索相册中的图片：”，供用户补充条件后发送。Agent 调用只读 `search_album_photos`，最多返回 3 张排序候选；单张照片直接展示，多张照片默认叠放，可展开逐张查看和放大，不会把已索引总数当作匹配数。仅当用户要求分析照片内容时，Agent 才需要调用 `read(gallery:gallery_<数字ID>)`，将该照片交给视觉模型。索引位于应用私有 SQLite 数据库，只保存照片 ID、版本信息和向量，原图仍由系统相册管理；搜索前会剔除当前已不可访问或已修改照片的旧向量。搜索不会自动扫描或上传照片；查询文字使用所选模型；本地工具返回的照片名称及派生信息须通过外发策略后才会进入在线模型请求。模型不进入仓库或 APK；模型文件说明及 SHA-256 见 SDK 的 `docs/embeddinggemma2-integration.md`。
+Companion is the application; **[Kiora](https://github.com/qhvssonic/kiora) is the reusable Kotlin SDK** behind it. Its A2A peers can run on a server, another device, or a business system. The current integration example uses DSH on a computer.
 
-Android 不允许应用直接读取另一个应用的 `Android/data` 目录。已有模型若存放在那里，先移到系统文件选择器可见的位置再导入；调试时也可以通过 ADB 复制到 Kiora 的私有 `files/models` 目录，设置页会自动发现该目录中的 `.litertlm` 文件。MNN 模型可通过目录选择器导入；调试时完整复制到私有 `files/mnn-models/<模型目录>/` 后，设置页也会发现其中的 `config.json`。
-- 相册搜索结果可展开并勾选要发送的照片；单张结果可直接点「发送到电脑」。选择已启用且设有触发别名的 A2A 连接后，照片先加入输入框附件，默认指令为保存到电脑桌面，用户可修改并点击发送。此路径把照片当作文件附件，不占用本机模型的单图视觉输入名额；实际上传仍遵循 A2A 工具授权与合计 10 MiB 限制。
-- 必须配置手机端使用的模型；其他 A2A Agent 的 Agent Card 是可选的工具来源，不是聊天模型或独立聊天模式。自定义模型站点地址可只填 `https://example.com`，SDK 会补全 `/v1/chat/completions`。
-- 设置页可手动添加或扫码添加多个 A2A Agent Card，分别命名、设置唯一的触发别名、启用、停用、编辑和删除；旧版单连接会自动迁移。旧连接若名为 `DSH Agent`，会自动得到别名 `dsh`。聊天中写“通过 dsh”时，只向模型提供该连接的 A2A 技能。接受 `type: "a2a-agent-connect"`、`v: 1` 的二维码 JSON，校验 `agentCardUrl` 与 `token` 后打开连接编辑框；`user`、`scopes` 供核对，扫码本身不授予工具权限。每个连接的 Bearer Token 单独加密存储。不同连接公布的 skill 使用不同工具名，模型与授权界面可分清目标 Agent。
-- 设置页显示每个 A2A 连接的状态，页面打开时和停留期间约每 15 秒检测一次，也可手动立即检测。检测会读取 Agent Card 并检查其公布的任务端口，不创建远端任务；“已连通”表示网络和 Card 可达，不保证远端工具执行成功。若聊天 Agent 此前发现连接失败，从设置页返回时会重新发现已启用连接，使网络恢复后的状态同步到聊天。
-- 聊天中的文件指代由智能体结合会话判断。宿主只提供本会话最近成功写入、且仍存在的工作区文件 ID 作为候选；候选不自动上传。A2A 技能要求模型说明文件位于手机、已经位于远端，或本任务不涉及文件。本轮已选择的附件由宿主绑定到对应 A2A 调用；其他手机文件需提供经宿主核验的 `files` ID。仅在回复中提到文件名不视为已创建文件。
-- 纯文字消息通过 Kiora `AgentRuntime` 运行，模型可按 Agent Card 中的 skill 调用已连接 Agent 的能力。
-- 任务运行时，继续发送纯文字会直接加入 follow-up 队列。当前任务正常完成后，App 会逐条启动排队指令并重新解析各自的连接别名与文件引用。输入框上方显示队列计数胶囊，点开可查看待处理指令；点某条的“引导”会取消当前手机端运行，并从该队列项立即启动新一轮，且不会重复执行它；点“×”可移除未开始的指令。停止后队列保留，点“继续”从首条恢复。发送和停止共用右下角按钮：输入框有文字时用于发送，输入框为空且任务运行中、队列非空时才显示停止图标。排队暂不支持附件；停止不会撤销已经执行的工具操作，也不等同于取消电脑端 A2A 任务。
-- 内置 `get_local_time` 小工具，可在端侧模型模式下验证模型选择工具、参数校验、执行工具和继续回答的完整循环。
-- 默认启用 `read`、`write`、`edit`；`shell` 需在设置页单独启用。`read` 可读取工作区相对路径、`selected:<index>` 指向的本轮已选文本或图片、`authorized:<folderId>/<path>` 指向的已授权文本或图片，以及 `gallery:<photoId>` 指向的照片；图片作为工具结果直接提供给当前视觉模型。`browse_phone_files` 负责发现已授权目录、文件和相册照片；`manage_authorized_file` 负责复制、移动、重命名、删除已授权文件，并在默认授权档逐次询问。底层仍通过 Android 系统接口核验目录与相册权限。系统只授予部分照片时不会声称能够浏览完整相册；聊天中手动选择的照片可直接用于本轮识别，无需逐张授权。
-- 电脑端 Agent Card 公布的每项 skill 才会生成对应 A2A 工具；不再预制笼统的附件发送工具。skill 声明可接收文件 MIME 类型后，模型可在该 skill 的 `files` 参数中选择本轮已选文件、已授权文件或应用工作区文件，并通过 `fileSource` 区分手机文件、远端已有文件和无文件任务。本轮选择的文件用 `selected:<index>`；工作区文件用 `workspace:<相对路径>` 或相对路径。`workspace:0` 不能代替 `selected:0`。宿主会校验本机文件确实附上，远端已有文件则保持对先前远端工作的引用；不会按固定中文词组改写用户任务。App 在弹出上传授权前核验文件 ID；无效 ID 作为参数错误返回模型，不显示可允许的授权弹窗。声明 `application/json` 后才会出现 `form` 参数。只有电脑端 Agent 实际公布并实现了相应能力，文件和表单调用才可成功。
-- 模型调用工具时，对话中会显示可折叠的工具记录，展开可查看参数与结果；调用状态写入 Room，重新打开会话仍可查看。
-- 设置页提供三档工具授权：**请我批准**（每次询问）、**帮我批准**（默认，自动执行工作区、已授权目录及已开放相册的只读工具；修改、命令和上传每次询问）、**完全访问权限**（自动执行已配置的工具）。电脑端 A2A 能力目前按风险未知处理；普通远端工具可按会话允许，附件上传工具在默认档每次都需确认目标、文件名和任务。会话授权只在当前应用进程中有效，重新保存连接设置后会清除；Android 权限与文件授权仍然生效。
-- 助手回复以 Android 原生文本渲染 Markdown，支持标题、列表、链接、引用、代码块、表格、删除线和任务清单；流式回复与历史会话使用同一排版。
-- 聊天中通过「＋」选择或直接拍摄的照片可在发送前或发送后全屏预览，支持双指缩放、拖动和双击复位；发送时会缩放后作为图片内容送入支持视觉的当前模型；本机 LiteRT-LM 最长边 512 像素，MNN 视觉模型和在线兼容接口最长边 1024 像素。当前 Kiora 的 LiteRT 接入每轮只传一张图片，MNN 视觉模型和在线模型一次最多八张；对应模型包必须包含视觉能力。本机模型会在较早对话达到宿主的资源预算时调用 SDK 持久摘要，保留原始会话与分支；MNN 不必手填上下文窗口。设置页的可选上限只控制 Kiora 超限保护，不修改模型自身的上下文能力；Gemma 4 E2B 当前测试包默认 4096 tokens。自动摘要无法完成或单轮过长时，已设置窗口的模型仍使用输入裁剪作为后备保护。OpenAI 预置模型使用已知窗口，其他兼容服务可手动填写。非图片附件的内容不进入模型首轮请求；智能体可用 `read(selected:<index>)` 查看受支持的文本，或在文件能力存在且任务需要时通过该 skill 发送。
-- 聊天输入栏的「＋」可选择“扫描文档”：连续拍摄页面或一次导入多张图片，使用 Kiora SDK 的 PP-OCRv6 small 适配器在本机逐页离线识别。扫描页可切换、调整顺序、删除，点按原图可放大查看，逐页校对文字并保存草稿；进入聊天时按页次填入校对后的原文。多页扫描的原图保留在扫描草稿中，不作为同一轮视觉输入；单页扫描在没有其他待发图片时仍附上原图。旧版单页草稿仍可读取。也可单独“拍照”进行视觉提问；这一路径的照片临时存于缓存，发送成功后清理。
-- 「选择文件」只列出应用工作区和设置中已授权目录里的文件，不提供任意手机文件选择器；「选择照片」和拍照是独立的用户主动选择入口。纯照片观察问题直接使用随消息附上的视觉输入；要求保存、发送等操作时仍提供相应工具。
-- 扫描文字进入聊天时，工具列表仍由宿主配置、Android 授权和电脑端 Agent Card 决定，不因扫描或附图场景缩减。工作区写入只作用于应用私有工作区，并继续遵循工具授权方式。
-- 输入栏同一个麦克风支持录音和停止（最长 30 秒）。设置中可选 **Paraformer 实时转写**（边说边显示，临时文字会修订）或 **SenseVoice 录完转写**；无需日常切换“字幕模式”。停止后文字留在输入框，核对或修改后再发送。每次只加载所选 ASR，退出界面停止录音并释放识别器；原始录音不落盘、不外发。模型文件独立导入，见下方准备步骤。
-- 助手回复可点「朗读」用 MeloTTS 在本机合成并播放，朗读仅由用户点击图标触发，不向智能体注册朗读工具。设置页「离线朗读」需选择完整的中文与词典内英文模型目录（推荐 FP32，也兼容 int8）；应用核对固定模型修订的 SHA-256 后复制到私有存储，模型不进入 APK。朗读可停止，切换会话、开始录音或离开聊天页也会停止。每次朗读完成后释放合成模型，当前不自动播报、保存音频或朗读超过 4000 字符的单次请求；音频本身不会传给在线模型或 A2A 对端。
-- 显示远端处理进度和结果；电脑端要求补充信息时，下一条消息继续同一远端任务。
-- 同一个手机会话对同一个 A2A 连接复用服务端返回的 `contextId`，让多次已完成的任务进入同一电脑端会话；需要补充信息或授权的未完成任务仍用 `taskId` 续接。不同手机会话、不同连接分别保存上下文。升级前的会话会优先恢复最早任务的上下文；若历史结果未保存上下文且服务端已清除任务记录，会停止发送并明确提示，避免悄悄创建第三个会话。
-- 使用同一个 Room 数据库保存会话列表、界面文本记录、SDK 会话树、A2A 连接上下文及待继续的任务 ID；附件内容不保存在会话中。模型 API Key 按提供商、Bearer Token 单独用 Android Keystore 加密后保存在应用私有存储，重启应用仍可使用；在设置中留空并保存可清除。
+> Experimental and currently built from source. Model files and some native dependencies are prepared separately. Choosing an online chat model sends ordinary chat input to that provider; use a local model for offline chat.
 
-会话数据直接写入 Room，不读取旧版 SharedPreferences 对话或 JSONL 会话。Room 会保存 SDK 返回的实际模型 ID 和可用的 token 用量；回复后和重开会话时可在状态栏查看最近一次模型调用。OpenAI、DeepSeek 预置云端接口请求流式用量，其他兼容服务仅在自身返回用量时显示；LiteRT-LM 只记录模型身份，MNN 记录原生引擎报告的输入与生成 token 数。A2A 任务需要输入或授权时，工具记录和状态栏显示等待状态，并保存远端 task ID 供下一轮继续。数据库当前为版本 6，提供从版本 1 到 6 的逐级迁移；结构定义保存在 `app/schemas/`。
+## What you can do
 
-附件总大小上限为 10 MiB。电脑端 Agent 必须能接收 A2A 1.x HTTP+JSON 或 JSONRPC，并处理 `raw` 附件。Debug APK 允许局域网 HTTP；正式构建应使用 HTTPS。
+| Start with a task | What the app provides | Setup |
+| --- | --- | --- |
+| **Organize paper documents** | Multi-page scanning, local OCR, page ordering, editable drafts, and model-assisted Markdown/file workflows | OCR native build assets; a chat model for model-assisted work |
+| **Find a photo by meaning** | Search an indexed local photo library by description; preview and select candidates | EmbeddingGemma 2 text/vision model, photo access, and a local index |
+| **Speak instead of type** | Paraformer streaming transcription or SenseVoice after recording; edit text before sending | Import the selected ASR model |
+| **Listen to an answer** | Tap the speaker icon for offline MeloTTS read-aloud; tap again to stop | Import a MeloTTS model directory; FP32 is recommended for the tested phone |
+| **Find a registered person** | Local enrollment, 1:N matching, front-camera scan queries, and indexed photo lookup | Face models, explicit camera/photo access, enrollment, and indexing |
+| **Continue work with another agent** | Discover skills, approve task/file transfer, follow progress, and continue a task that needs input | A phone-reachable A2A 1.x endpoint implementing the required skill |
 
-### 连接 DSH A2A
+Local features work after their models and indexes are ready. Remote tasks depend on the peer's actual capabilities. Face workflows are dedicated screens; read-aloud is a manual UI action. Neither is registered as a chat tool by default.
 
-在 DSH `@ryubyte/dsh-a2a` 的「对外服务」中创建 Agent，默认端点路径为 `/a2a`。保存并上线后，复制完整的 Agent Card URL，在 Companion 设置的「连接的 A2A Agent」中添加；手机与电脑应能通过该 URL 互访。若 DSH 开启入站 Bearer 鉴权，在 Companion 对应连接中填同一令牌。DSH 的 Base URL 应指向手机可访问的电脑地址；仅当自动推断的地址可从手机访问时才可留空。`localhost` 和 `127.0.0.1` 在手机上指向手机自己。
+```mermaid
+flowchart LR
+    Input[Documents / photos / voice] --> Phone[Local processing]
+    Phone --> Review[Review and choose]
+    Review --> Chat[Local model + tools]
+    Chat --> Result[Answer / local file]
+    Chat --> Approval[Transfer approval]
+    Approval --> Peer[A2A agent]
+    Peer --> Reply[Remote text result]
+```
 
-安装版 `@ryubyte/dsh-a2a` 0.3.1 默认忽略 raw 文件 Part。本仓库 `scripts/patch-dsh-a2a-attachment-bridge.mjs` 在入站执行器调用 DSH Agent 前校验并暂存附件，仅把用户指令与本地文件路径、MIME、大小和 SHA-256 交给模型；文件的保存目标或分析方式仍由 DSH Agent 按用户指令决定。`scripts/configure-dsh-a2a-delegate.mjs` 配置通用 `delegate_task` 技能及文件输入类型，保留原 Bearer Token 和出站连接。本机的独立副本、原版与桥接版快照、设计及升级说明保存在仓库外的 `../DSH-A2A-通用附件桥接/`；插件升级后须先核对新版本，再移植补丁。这些 DSH 脚本不属于 Companion 的构建步骤。
+## Get started
 
-## 本地资料与工具边界
+### 1. Build and install
 
-读取文件的授权与把内容发送给在线模型或 A2A 接收方的授权分别处理。“设置 → 工具授权 → 本地资料处理”提供两种方式：
+The current path is **building from source**, with JDK 17, Android SDK 35, SDK snapshots in local Maven, and prepared OCR/speech native artifacts. The app supports Android 8.0+; model/runtime requirements vary by device. MNN currently packages arm64-v8a only.
 
-| 设置 | 行为 |
+Follow the [full build guide](docs/app-guide.en.md#build-and-run) or [中文构建指南](docs/app-guide.zh-CN.md#构建与运行). It includes the shared ONNX Runtime preparation needed by OCR and speech.
+
+```text
+app/build/outputs/apk/debug/app-debug.apk
+```
+
+### 2. Choose a chat model
+
+- **Local:** import a supported LiteRT-LM `.litertlm` file or a complete MNN model directory. Weights are copied into app-private storage.
+- **Online:** configure a Chat Completions-compatible provider. Online inference requires internet access.
+
+The [ModelScope bundle](https://www.modelscope.cn/models/vqhvqh/kiora_model_bundles) and [model setup guides](https://github.com/qhvssonic/kiora/blob/main/docs/on-device-models.md) explain assets and upstream requirements. Model weights are not included in the APK.
+
+### 3. Try one local workflow
+
+Start with **Scan documents**: add pages, inspect local OCR, reorder or correct the draft, and bring the reviewed text into chat. Add speech, semantic photo search, or face models only when you want those features.
+
+A2A setup is optional. Add an Agent Card URL in settings only when you have a reachable peer; see [connection setup](docs/app-guide.en.md#connecting-to-a-dsh-a2a-service). No remote agent is needed to try local features.
+
+## You choose what leaves the phone
+
+- **Local resource access and external transfer are separate permissions.** Tagged local session data requires confirmation before reaching an online model or A2A recipient, or can be kept local by policy.
+- **Source labels survive restarts and derived answers.** This is session-level provenance, not automatic detection of sensitive information in every typed message.
+- **Tool calls are visible.** Expand arguments and results; version 0.1.108 distinguishes verified effects, unconfirmed effects, and failed calls.
+- **Local media processing stays explicit.** Raw microphone audio is not saved or automatically uploaded. TTS audio and face processing remain local; selected file/photo transfer still requires the configured policy checks.
+
+“Keep local data on device” is **not a global network switch**. Ordinary typed text is handled by the selected model. Use a local chat model for an entirely local conversation.
+
+[Permission details and implementation boundaries](docs/app-guide.en.md#local-data-and-tool-boundaries) · [SDK runtime policy and verification](https://github.com/qhvssonic/kiora/blob/main/docs/runtime-safety.md)
+
+## App or SDK?
+
+| Project | Use it for |
 | --- | --- |
-| 外发前询问（默认） | 已标记的本地资料将进入在线模型或 A2A 请求前，显示接收方和来源类别；可允许一次、本会话允许或拒绝。拒绝会结束本轮，不让模型继续换工具重试。 |
-| 仅在本机处理 | 阻止已标记的会话资料外发。“完全访问权限”仍不能绕过这项设置。 |
+| **This repository: Companion** | Android screens, camera/scanning flows, local indexes, permissions, playback, and Room-backed conversations |
+| **[Kiora SDK](https://github.com/qhvssonic/kiora)** | Embedding the agent runtime, model adapters, tool interfaces, durable sessions, and A2A in your own application |
 
-扫描文字、语音转写、已选文件/图片和工具结果会产生来源标签，按会话 ID 持久保存在应用私有 `local_data_sources` 配置中；它不额外复制文件或原始录音。修改转写、删除“扫描原文”文字或生成回答/摘要都不会清除标签；重启后仍保留。旧会话缺少来源信息时保守标记为历史资料。
+## Status and roadmap
 
-这是**会话级的来源继承**，没有逐段追踪哪个句子来自哪个文件，也不自动识别键入文字中的隐私信息。该设置约束已标记资料，不是全局断网开关；普通键入文字仍由所选模型处理，完全本机对话应选择本机模型。
+**Local validation, 2026-11-03:** 67 Companion JVM tests and the 0.1.108 debug build passed. Earlier V2509A / Android 16 testing covered source/approval flows, voice lifecycle, and 20 mixed-model rounds. Those are scoped observations, not universal device support or a guarantee of model accuracy.
 
-本会话允许覆盖当前接收方的后续资料，仅在当前 Agent 实例内有效；重启、重新配置或关闭后失效。同一服务器上的不同 A2A 连接不共享批准。来源标签与外发批准是不同状态：标签持久保存，批准不跨重启保留。设置页显示最近 30 条授权决定，记录时间、接收方和来源类别，不代表实际发送成功。
+Known limits:
 
-每次发送时固定可用工具和本轮附件绑定，不按“保存、上传”等任务关键词隐藏图片场景工具；明确的连接别名用于绑定 A2A 目的地。`read` 在授权前检查附件序号、工作区文件存在性、授权文件和照片访问权限，执行时继续核验权限。不存在的资源返回参数错误，不先弹出允许访问的对话框。检查保证资源与权限边界，**不能保证模型的工具选择或知识回答正确**。
+- Gemma 4 E2B knowledge/tool-routing regression still fails. Inspect proposed actions and use suitable models; permission checks do not guarantee correct planning.
+- A2A currently consumes remote text results. Returned files, SSE, and push notifications are not implemented; stopping local waiting does not automatically cancel the remote task.
+- Streaming ASR is button-triggered microphone input, not always-on listening or system-audio captions. TTS is manual read-aloud, not an automatic voice agent.
+- Source setup currently involves native artifact preparation. GPU support, memory use, and supported model formats vary; see the guides rather than assuming all phones behave alike.
 
-聊天模型、ASR、TTS、OCR、Embedding 和人脸推理共用资源协调，取消后等待原生清理再交接；聊天权重可继续驻留。它控制并发并检查系统低内存状态，没有承诺固定内存上限。扫描原图只作本地校对参考；需要发送扫描成品时先生成并核验 Markdown。A2A 返回文件接收仍未实现。
+Next steps:
 
-接口、Bitmap 所有权修复、测试条件和已知失败项见 SDK [运行策略与真机验证](https://github.com/qhvssonic/kiora/blob/main/docs/runtime-safety.md)。
+- [ ] Improve real-model task/tool reliability and reproduce failures across devices.
+- [ ] Expand resource/lifecycle checks for long sessions and alternating local models.
+- [ ] Evaluate **Fun-ASR-Nano dialect input** with actual samples. **Planned, not implemented; current ASR is SenseVoice / Paraformer.**
 
-## 本地人脸
+[Device evidence](https://github.com/qhvssonic/kiora/blob/main/docs/runtime-safety.md) · [Fun-ASR plan](https://github.com/qhvssonic/kiora/blob/main/docs/mobile-agent-roadmap.md#fun-asr-plan)
 
-侧栏「本地人脸 · 注册与查找」提供离线人员注册、多样本追加、删除、1:N 候选搜索以及按人脸查相册。
-也可从设置页进入。导入 InsightFace 官方 `buffalo_sc` 解压后的整个目录；仅接受固定 SHA-256 的
-`det_500m.onnx` 和 `w600k_mbf.onnx`。权重仅供非商业研究，未包含在仓库或 APK。
-模型准备与 SDK 接口见 [人脸接入](https://github.com/qhvssonic/kiora/blob/main/docs/face-recognition.md)。
+## Guides and feedback
 
-侧栏入口使用人脸扫描线条图标，人脸页使用与设置页一致的分组卡片和底部弹窗；“注册”位于人员分组右侧，
-清空索引和删除全部数据位于右上角“⋯”菜单中。
+- [English app guide](docs/app-guide.en.md) / [中文应用指南](docs/app-guide.zh-CN.md): models, builds, DSH connections, permissions, faces, and voice setup.
+- SDK capability guides: [OCR](https://github.com/qhvssonic/kiora/blob/main/docs/document-ocr.md), [speech recognition](https://github.com/qhvssonic/kiora/blob/main/docs/speech-recognition.md), [speech synthesis](https://github.com/qhvssonic/kiora/blob/main/docs/speech-synthesis.md), [photo embeddings](https://github.com/qhvssonic/kiora/blob/main/docs/embeddinggemma2-integration.md), [face recognition](https://github.com/qhvssonic/kiora/blob/main/docs/face-recognition.md).
+- [Report a bug or suggest a workflow](https://github.com/qhvssonic/kiora-companion/issues). Include device/Android version, app version, model/backend, steps, and redacted logs. Do not attach private documents, face data, or credentials.
 
-识别和查找支持实时扫描：取景框内显示扫描动画，连续确认一张清晰、稳定的人脸后自动查询，
-无需按拍照键。预览帧仅在内存分析，不生成照片；扫描稳定性判断不等于活体检测。
-注册仍需主动拍照或选图。相机只在用户打开时运行，返回或切到后台即释放，注册临时照片处理后删除。
-人员特征与多脸相册索引存在应用私有 SQLite `databases/faces.db`，原始相册照片不复制到该数据库。
-照片访问通过 Android 授权，查询前清理已撤权、删除或变化的索引；无清晰人脸的照片也记录处理版本。
-索引可停止并增量继续，不提供后台任务。删除人员、清空相册索引和删除全部人脸数据分别操作。
-不自动加入智能体工具，不上传照片或特征。搜索结果为候选，当前阈值尚未进行真实人群校准，也不包含活体检测。
+If Companion helps you explore on-device agents, a star helps others find the project. Contributions to setup docs, translations, and reproducible device reports are welcome.
 
-0.1.103 验证记录：52 项 JVM 测试和 3 项显式开启的真机回归通过，覆盖预览转换/稳定判断、
-模型推理、注册与索引存储、多人选图及扫描结果查询。V2509A / Android 16 已实测前置扫描自动识别、
-查找相册及查询后的相机释放。公开样例验证不代表真实人群准确率或大相册性能验收。
-测试输入、运行方式和具体边界见 [人脸验证说明](https://github.com/qhvssonic/kiora/blob/main/docs/face-recognition.md#验证)。
-
-## 后续计划：Fun-ASR 方言语音输入
-
-**状态：已列入计划，等待 SDK 适配与真机验证，当前版本尚未提供 Fun-ASR。**
-
-- [ ] 在已有 SenseVoice / Paraformer 选择中增加 Fun-ASR-Nano，保留现有配置。
-- [ ] 增加独立模型目录导入、完整性校验和准备状态提示，模型准备完成后可离线使用。
-- [ ] 复用按键录音与可编辑转写流程：用户检查识别文字后再发送，不自动上传原始录音。
-- [ ] 测试后端切换、取消、后台退出、模型缺失及与聊天/朗读交替使用；用实际方言样本比较识别效果。
-
-首轮保持按键录音交互，目标方言与支持范围通过样本测试确定。SDK 适配、运行库复用和验收阶段见 [Fun-ASR 集成计划](https://github.com/qhvssonic/kiora/blob/main/docs/mobile-agent-roadmap.md#fun-asr-plan)。
-
-## 构建与运行
-
-需要 JDK 17、Android SDK（`compileSdk 35`），以及与本仓库同级检出的 `kiora` SDK。先在 `../kiora` 发布 SDK 0.3.0-SNAPSHOT 到本机 Maven。Paddle OCR 适配器还需要按 SDK 的 OCR 文档构建官方 AAR；若 AAR 不在脚本的默认路径，给 `install-paddle-ocr.ps1` 传入 `-Aar` 绝对路径。SenseVoice、Paraformer 与 MeloTTS 模型权重不进入仓库或 APK，运行时由用户导入。MeloTTS 的固定修订、模型准备脚本和验收边界见 SDK 的 [离线语音合成](https://github.com/qhvssonic/kiora/blob/main/docs/speech-synthesis.md)。
-
-```powershell
-cd ..\kiora
-.\gradlew.bat :core:publishToMavenLocal :a2a:publishToMavenLocal :model-chat:publishToMavenLocal :model-mnn:publishToMavenLocal :model-litert:publishToMavenLocal :embedding:publishToMavenLocal :face:publishToMavenLocal :face-onnx:publishToMavenLocal :embedding-mediapipe:publishToMavenLocal :android-attachments:publishToMavenLocal :android-storage-tools:publishToMavenLocal :document-ocr:publishToMavenLocal
-.\scripts\install-sherpa-onnx.ps1
-.\gradlew.bat :speech:publishToMavenLocal :speech-sherpa-onnx:publishToMavenLocal -PsherpaLocalRepo=..\artifacts\maven
-.\scripts\install-paddle-ocr.ps1
-.\gradlew.bat :document-ocr-paddle:publishToMavenLocal -PpaddleLocalRepo=..\artifacts\maven
-```
-
-再构建独立应用：
-
-```powershell
-cd ..\kiora-companion
-python -m pip install --target ..\artifacts\py-lief lief==1.0.0
-$env:PYTHONPATH = (Resolve-Path ..\artifacts\py-lief).Path
-python .\scripts\install-onnxruntime-shared.py
-.\gradlew.bat :app:assembleDebug -PkioraLocalRepo=..\artifacts\maven
-```
-
-脚本校验官方 ONNX Runtime 1.28.0 Android AAR 和 sherpa-onnx 1.13.8 AAR 的 SHA-256，借助 LIEF 将 OCR Java/JNI 桥接库的 ELF 符号版本要求改为 `VERS_1.28.2`，并移除其自带的 ONNX Runtime 原生库。本地 Maven 生成 `1.28.0-kiora-ort1.28.2`，使 PP-OCRv6 和 SenseVoice 共用 sherpa-onnx 提供的 ONNX Runtime 1.28.2；Java/JNI 代码仍来自官方 1.28.0 AAR。不能以 Gradle 的 `pickFirst` 随机选一份同名库。独立预览版已在同一手机进程中通过 OCR → SenseVoice → OCR 测试。默认调试 APK 含四种 ABI。
-
-只在 arm64 手机测试时，可给构建命令加 `-PocrCompareArm64Only`，显著减小 APK；这份包不能安装到 x86 模拟器。
-
-需要在同一手机上验证新界面而保留已安装应用数据时，可在构建命令中加 `-PcompanionPreview`。这会生成包名为 `dev.kiora.companion.preview` 的独立调试版；它有自己的私有数据和模型目录，不会读取正式版的数据。验证结束后去掉该参数重新构建，产物恢复为正式包名。
-
-APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。在聊天输入栏点「＋」→「扫描文档」，拍摄或导入多页后，可在页码导航中逐页查看原图和 PP-OCRv6 结果、修改文字、调整页序，再用于聊天。由扫描草稿发起“整理为 Markdown 后经 A2A 发送”时，手机端先写出 `.md`，再将生成文件交给目标 Agent；单页原图只作本机校对参考，不会替代成品上传。安装后点右上角设置，选择提供商和模型，填写密钥；如需电脑端能力，再配置 A2A Agent Card。聊天顶部可切换当前提供商的预置模型，左上角可搜索与切换历史会话。只有 Agent Card 声明了相应文件输入能力、模型调用该 skill 并通过工具授权时，App 才会上传文件。
-
-设备测试应使用独立测试机或模拟器。Android Gradle 的 `connectedDebugAndroidTest` 在本项目的一次真机测试后卸载了目标 App；其私有会话、设置、授权信息和已导入模型随卸载清除。日常更新已配置的手机应使用 `adb install -r` 覆盖安装，并在测试前另行备份需要保留的数据。
-
-## SDK 集成位置
-
-`app/build.gradle.kts` 引用 Kiora SDK 模块；所有 `dev.kiora` 模块统一从 `mavenLocal()` 读取，`-PkioraLocalRepo` 只补充第三方原生依赖，明确排除其中可能残留的旧 SDK 快照。修改 SDK 后先重新发布所用模块，再构建 Companion；不要混用按不同 LiteRT-LM 版本编译的适配器。`CompanionAgent` 将模型、A2A、会话存储、工具授权和文件读取组合起来；`MainActivity` 负责界面、手动朗读、系统选择器及发送确认。
-
-当前版本处理文本与小型内联附件；较大文件、远端返回文件下载和后台任务通知留待后续版本。
-
-聊天中的“选择文件”只浏览应用工作区和“连接设置 → 授权目录”里仍有效的目录授权。工作区默认可选；其他目录须先在设置中通过 Android 授权。拍照和单次选择照片是独立的用户主动选择入口。发送后输入框上的附件立即清空，图片在发送前和会话记录中显示缩略图；记录中的缩略图保存在本机应用私有目录。
-
-## 实时语音输入模型准备
-
-Companion 0.1.104 新增 Paraformer 中英双语 int8。先在 SDK 仓库运行：
-
-```powershell
-python scripts/prepare_streaming_paraformer.py ..\artifacts\streaming-paraformer-zh-en-int8
-```
-
-将输出目录复制到手机。在设置的“端侧语音识别”中选择完整目录，内含 `encoder.int8.onnx`、`decoder.int8.onnx`、`tokens.txt`；应用逐个核对 SHA-256，验证模型可加载后才替换配置。再将“语音输入方式”选为“Paraformer · 实时转写”，之后只需使用原有麦克风按钮。
-
-模型合计约 237 MB，复用现有 sherpa-onnx/ONNX Runtime，不增加第二套运行库。0.1.105 起，点击后并行收音与加载模型，开头音频保留在最多三秒（约 96 KB）的队列中，超出处理速度会报错；识别会话结束后释放模型。模型文件大小不代表运行内存。当前不提供常开监听、系统音频字幕、自动标点或字词时间戳，Fun-ASR-Nano 方言识别仍在计划中。固定模型来源、接口与验证记录见 SDK [端侧语音识别](https://github.com/qhvssonic/kiora/blob/main/docs/speech-recognition.md)。
-
-2026-10-27 在 V2509A / Android 16 上通过公开语音样本及麦克风生命周期测试：前台模型加载 1.14 秒，模型准备后首批文字约 1.35 秒；15 秒样本更新 19 次。该轮整个进程 PSS 相对识别前增加约 516 MiB，关闭 ASR 后仍高于原基线，不能认为实时转写没有额外内存开销。断网下验证了停止、后台退出和快速取消，63 项 JVM 测试通过。以上为单机少量样本，完整条件和未验证边界见 SDK 语音识别文档。
-
-0.1.105 优化了点击麦克风后的响应：先收音并同步加载模型，V2509A 单次测得点击到收音约 74 ms；首字仍受模型加载和语音上下文窗口影响。最多三秒的小缓冲保留开头的话，结束后照常释放模型。新增四项管线回归，Companion 56 项 JVM 测试及真机停止/后台退出/快速取消测试通过。
-
-0.1.106 优化实时转写的文字显示：保留输入框的 Editable 与已有前缀，只替换变化部分；新增文字按完整字符簇用短动画展开，默认动画倍率下最长约 120 ms。重复快照不重启动画，识别纠错与最终结果立即显示；录音期间隐藏闪动光标，结束后恢复。取消或切换会话会清除待执行动画，避免旧内容覆盖人工修改。模型仍按自身分块节奏产出结果，显示优化不改变识别准确率或上下文窗口。
+Source code: [Apache-2.0](LICENSE). Models and native dependencies have separate upstream terms.
