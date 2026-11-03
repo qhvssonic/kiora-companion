@@ -1,6 +1,9 @@
 package dev.kiora.companion
 
 import dev.kiora.core.ToolCall
+import dev.kiora.core.AgentMessage
+import dev.kiora.core.ToolAttention
+import dev.kiora.core.ToolVerificationStatus
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.booleanOrNull
@@ -17,7 +20,19 @@ data class ToolTrace(
     val result: String = "",
     val state: State = State.RUNNING,
 ) {
-    enum class State { RUNNING, SUCCEEDED, FAILED, INPUT_REQUIRED, AUTH_REQUIRED }
+    enum class State { RUNNING, SUCCEEDED, VERIFIED, UNVERIFIED, FAILED, INPUT_REQUIRED, AUTH_REQUIRED }
+
+    fun completed(output: AgentMessage.ToolResult): ToolTrace = copy(
+        result = output.text.take(16_000) + if (output.text.length > 16_000) "\n…结果已截断" else "",
+        state = when {
+            output.isError -> State.FAILED
+            output.attention == ToolAttention.INPUT_REQUIRED -> State.INPUT_REQUIRED
+            output.attention == ToolAttention.AUTH_REQUIRED -> State.AUTH_REQUIRED
+            output.verification?.status == ToolVerificationStatus.VERIFIED -> State.VERIFIED
+            output.verification?.status == ToolVerificationStatus.UNVERIFIED -> State.UNVERIFIED
+            else -> State.SUCCEEDED
+        },
+    )
 
     data class AlbumPhoto(val id: Long, val name: String)
 

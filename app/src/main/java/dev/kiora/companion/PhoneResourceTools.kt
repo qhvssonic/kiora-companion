@@ -139,7 +139,9 @@ internal class PhoneResourceTools(
             ),
         )
 
-        override suspend fun execute(arguments: JsonObject): String {
+        override suspend fun execute(arguments: JsonObject): String = executeResult(arguments).text
+
+        override suspend fun executeResult(arguments: JsonObject): ToolOutput {
             val action = arguments.value("action")
             val target = buildJsonObject {
                 arguments["photoId"]?.let { put("photoId", it) }
@@ -158,10 +160,10 @@ internal class PhoneResourceTools(
                         target["newName"]?.let { put("newName", it) }
                     }
                     storage(if (action == "copy") "copy_authorized_file" else "move_authorized_file")
-                        .execute(transfer)
+                        .executeResult(transfer)
                 }
-                "rename" -> storage("rename_authorized_file").execute(target)
-                "delete" -> storage("delete_authorized_file").execute(target)
+                "rename" -> storage("rename_authorized_file").executeResult(target)
+                "delete" -> storage("delete_authorized_file").executeResult(target)
                 else -> error("Unknown file action")
             }
         }

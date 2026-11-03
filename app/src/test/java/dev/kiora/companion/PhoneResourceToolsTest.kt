@@ -14,6 +14,20 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PhoneResourceToolsTest {
+    @Test fun managePreservesProviderFailureAndVerificationMetadata() = runBlocking {
+        var output = ToolOutput("provider refused", isError = true, structuredContent = args("reason" to "blocked"))
+        val provider = object : AgentTool {
+            override val definition = ToolDefinition("delete_authorized_file", "delete", JsonObject(emptyMap()))
+            override suspend fun execute(arguments: JsonObject): String = error("Use the rich result")
+            override suspend fun executeResult(arguments: JsonObject) = output
+        }
+        val manage = PhoneResourceTools(provider, listOf(provider), emptyList()).all()
+            .first { it.definition.name == PhoneResourceTools.MANAGE }
+        assertEquals(output, manage.executeResult(args("action" to "delete", "folderId" to "folder_1", "path" to "a")))
+        output = ToolOutput("provider accepted", verification = dev.kiora.core.ToolVerification(
+            dev.kiora.core.ToolVerificationStatus.UNVERIFIED, "Final state not observed"))
+        assertEquals(output, manage.executeResult(args("action" to "delete", "folderId" to "folder_1", "path" to "a")))
+    }
     @Test fun invalidResourceIsRejectedBeforeAuthorizationAndExecution() = runBlocking {
         var approvals = 0
         var reads = 0

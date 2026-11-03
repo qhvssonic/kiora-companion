@@ -5,6 +5,8 @@ import dev.kiora.core.ToolCall
 import dev.kiora.core.ToolFailureKind
 import dev.kiora.core.ToolImage
 import dev.kiora.core.ToolAttention
+import dev.kiora.core.ToolVerification
+import dev.kiora.core.ToolVerificationStatus
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -47,6 +49,9 @@ internal object AgentMessageCodec {
             message.failureKind?.let { "failureKind" to JsonPrimitive(it.name) },
             message.structuredContent?.let { "structuredContent" to it },
             message.attention?.let { "attention" to JsonPrimitive(it.name) },
+            message.verification?.let { "verification" to JsonObject(mapOf(
+                "status" to JsonPrimitive(it.status.name), "summary" to JsonPrimitive(it.summary),
+            )) },
         ))
     }.toString()
 
@@ -81,6 +86,10 @@ internal object AgentMessageCodec {
                 }, value["structuredContent"],
                 value["attention"]?.jsonPrimitive?.content?.let { name ->
                     ToolAttention.entries.firstOrNull { it.name == name }
+                }, value["verification"]?.jsonObject?.let { verification ->
+                    ToolVerificationStatus.entries.firstOrNull {
+                        it.name == verification["status"]?.jsonPrimitive?.content
+                    }?.let { ToolVerification(it, verification.getValue("summary").jsonPrimitive.content) }
                 })
             else -> error("Unknown agent message role")
         }

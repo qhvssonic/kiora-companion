@@ -859,13 +859,15 @@ class MainActivity : Activity() {
         val stateText = when (trace.state) {
             ToolTrace.State.RUNNING -> if (restored) "调用中断" else "正在调用"
             ToolTrace.State.SUCCEEDED -> "已调用"
+            ToolTrace.State.VERIFIED -> "结果已验证"
+            ToolTrace.State.UNVERIFIED -> "效果未确认"
             ToolTrace.State.FAILED -> "调用失败"
             ToolTrace.State.INPUT_REQUIRED -> "等待补充信息"
             ToolTrace.State.AUTH_REQUIRED -> "等待授权"
         }
         val icon = when (trace.state) {
             ToolTrace.State.FAILED -> "⚠"
-            ToolTrace.State.INPUT_REQUIRED, ToolTrace.State.AUTH_REQUIRED -> "◷"
+            ToolTrace.State.INPUT_REQUIRED, ToolTrace.State.AUTH_REQUIRED, ToolTrace.State.UNVERIFIED -> "◷"
             else -> "⌘"
         }
         header.text = "$icon $stateText ${trace.label}  ⌄"
@@ -1143,17 +1145,7 @@ class MainActivity : Activity() {
             }
             is AgentEvent.ToolCompleted -> {
                 val live = liveTools.remove(event.result.callId) ?: return
-                val result = event.result.text.let {
-                    if (it.length > 16_000) it.take(16_000) + "\n…结果已截断" else it
-                }
-                live.trace = live.trace.copy(
-                    result = result,
-                    state = when (event.result.attention) {
-                        dev.kiora.core.ToolAttention.INPUT_REQUIRED -> ToolTrace.State.INPUT_REQUIRED
-                        dev.kiora.core.ToolAttention.AUTH_REQUIRED -> ToolTrace.State.AUTH_REQUIRED
-                        null -> if (event.result.isError) ToolTrace.State.FAILED else ToolTrace.State.SUCCEEDED
-                    },
-                )
+                live.trace = live.trace.completed(event.result)
                 conversations.updateTool(live.messageId, live.trace)
                 updateToolLine(live.header, live.trace)
             }
