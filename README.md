@@ -10,19 +10,19 @@ Built with [Kiora SDK](https://github.com/qhvssonic/kiora) · App 0.1.108 · And
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-[What you can do](#what-you-can-do) · [Get started](#get-started) · [Build guide](docs/app-guide.en.md#build-and-run) · [Kiora SDK](https://github.com/qhvssonic/kiora) · [Feedback](https://github.com/qhvssonic/kiora-companion/issues)
+[Download APK](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.108) · [What you can do](#what-you-can-do) · [Get started](#get-started) · [Build guide](docs/app-guide.en.md#build-and-run) · [Kiora SDK](https://github.com/qhvssonic/kiora) · [Feedback](https://github.com/qhvssonic/kiora-companion/issues)
 
 Scan a document, find a photo by description, dictate a message, or listen to a reply using local models. When a task needs another agent, connect over A2A and approve what leaves the phone.
 
 Companion is the application; **[Kiora](https://github.com/qhvssonic/kiora) is the reusable Kotlin SDK** behind it. Its A2A peers can run on a server, another device, or a business system. The current integration example uses DSH on a computer.
 
-> Experimental and currently built from source. Model files and some native dependencies are prepared separately. Choosing an online chat model sends ordinary chat input to that provider; use a local model for offline chat.
+> Experimental preview: an installable debug-signed APK is available in [Releases](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.108). Chat, speech, embedding and face models are imported separately; this APK includes OCR assets. Choosing an online chat model sends ordinary chat input to that provider; use a local model for offline chat.
 
 ## What you can do
 
 | Start with a task | What the app provides | Setup |
 | --- | --- | --- |
-| **Organize paper documents** | Multi-page scanning, local OCR, page ordering, editable drafts, and model-assisted Markdown/file workflows | OCR native build assets; a chat model for model-assisted work |
+| **Organize paper documents** | Multi-page scanning, local OCR, page ordering, editable drafts, and model-assisted Markdown/file workflows | OCR assets are included in the preview APK; choose a chat model for model-assisted work |
 | **Find a photo by meaning** | Search an indexed local photo library by description; preview and select candidates | EmbeddingGemma 2 text/vision model, photo access, and a local index |
 | **Speak instead of type** | Paraformer streaming transcription or SenseVoice after recording; edit text before sending | Import the selected ASR model |
 | **Listen to an answer** | Tap the speaker icon for offline MeloTTS read-aloud; tap again to stop | Import a MeloTTS model directory; FP32 is recommended for the tested phone |
@@ -44,11 +44,11 @@ flowchart LR
 
 ## Get started
 
-### 1. Build and install
+### 1. Install the preview APK
 
-The current path is **building from source**, with JDK 17, Android SDK 35, SDK snapshots in local Maven, and prepared OCR/speech native artifacts. The app supports Android 8.0+; model/runtime requirements vary by device. MNN currently packages arm64-v8a only.
+Download **`kiora-companion-v0.1.108-debug.apk`** from the [v0.1.108 preview release](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.108). The universal APK is approximately **438 MiB** and supports Android 8.0+; model/runtime requirements vary by device. MNN currently packages arm64-v8a only. The release includes bilingual notes, installation details and `SHA256SUMS.txt`.
 
-Follow the [full build guide](docs/app-guide.en.md#build-and-run) or [中文构建指南](docs/app-guide.zh-CN.md#构建与运行). It includes the shared ONNX Runtime preparation needed by OCR and speech.
+The APK is debug-signed: an in-place update requires the same signing certificate. Back up data you need before changing installations. To build it yourself, follow the [full build guide](docs/app-guide.en.md#build-and-run) or [中文构建指南](docs/app-guide.zh-CN.md#构建与运行), including the shared ONNX Runtime preparation for OCR and speech. The build output is:
 
 ```text
 app/build/outputs/apk/debug/app-debug.apk
@@ -59,7 +59,7 @@ app/build/outputs/apk/debug/app-debug.apk
 - **Local:** import a supported LiteRT-LM `.litertlm` file or a complete MNN model directory. Weights are copied into app-private storage.
 - **Online:** configure a Chat Completions-compatible provider. Online inference requires internet access.
 
-The [ModelScope bundle](https://www.modelscope.cn/models/vqhvqh/kiora_model_bundles) and [model setup guides](https://github.com/qhvssonic/kiora/blob/main/docs/on-device-models.md) explain assets and upstream requirements. Model weights are not included in the APK.
+The [ModelScope bundle](https://www.modelscope.cn/models/vqhvqh/kiora_model_bundles) and [model setup guides](https://github.com/qhvssonic/kiora/blob/main/docs/on-device-models.md) explain assets and upstream requirements. Chat, speech, embedding and face model weights are not included in the APK; OCR assets are bundled.
 
 ### 3. Try one local workflow
 

@@ -10,19 +10,19 @@
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-[可以做什么](#可以做什么) · [开始体验](#开始体验) · [构建指南](docs/app-guide.zh-CN.md#构建与运行) · [Kiora SDK](https://github.com/qhvssonic/kiora) · [问题反馈](https://github.com/qhvssonic/kiora-companion/issues)
+[下载 APK](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.108) · [可以做什么](#可以做什么) · [开始体验](#开始体验) · [构建指南](docs/app-guide.zh-CN.md#构建与运行) · [Kiora SDK](https://github.com/qhvssonic/kiora) · [问题反馈](https://github.com/qhvssonic/kiora-companion/issues)
 
 扫描并整理文档，按描述寻找照片，用语音输入消息，或在本机朗读回答。需要其他智能体继续处理时，再通过 A2A 连接，并确认哪些内容可以离开手机。
 
 Companion 是应用，**[Kiora](https://github.com/qhvssonic/kiora) 是可复用的 Kotlin SDK**。A2A 对端可以运行在服务器、其他设备或业务系统中；当前集成示例使用电脑上的 DSH。
 
-> 当前处于实验阶段，通过源码构建体验。模型文件和部分原生依赖需单独准备。选择在线聊天模型时，普通聊天输入会发送给该提供商；离线聊天需选择本机模型。
+> 当前处于实验阶段，可从 [Release](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.108) 下载 debug 签名预览 APK。聊天、语音、Embedding 和人脸模型需单独导入，本包已含 OCR 资产。选择在线聊天模型时，普通聊天输入会发送给该提供商；离线聊天需选择本机模型。
 
 ## 可以做什么
 
 | 从一个任务开始 | 应用提供的流程 | 需要准备 |
 | --- | --- | --- |
-| **整理纸质文档** | 多页扫描、本地 OCR、页面排序、可编辑草稿及模型辅助 Markdown/文件操作 | OCR 原生构建资产；模型辅助步骤需要聊天模型 |
+| **整理纸质文档** | 多页扫描、本地 OCR、页面排序、可编辑草稿及模型辅助 Markdown/文件操作 | 预览 APK 已含 OCR 资产；模型辅助步骤需要聊天模型 |
 | **按含义找照片** | 按描述检索已建立本地索引的相册，预览并选择候选照片 | EmbeddingGemma 2 文字/视觉模型、相册授权及索引 |
 | **用说话代替打字** | Paraformer 边说边转写，或 SenseVoice 录完识别；确认文字后再发送 | 导入所选 ASR 模型 |
 | **听取回复** | 点击扬声器图标用 MeloTTS 离线朗读，再点停止 | 导入 MeloTTS 模型目录；目标测试手机推荐 FP32 |
@@ -44,11 +44,11 @@ flowchart LR
 
 ## 开始体验
 
-### 1. 构建并安装
+### 1. 安装预览 APK
 
-当前体验路径是**源码构建**，需要 JDK 17、Android SDK 35、本机 Maven 中的 SDK 快照，以及已准备的 OCR/语音原生库。应用最低 Android 8.0；模型和运行库仍有各自设备要求。MNN 当前只打包 arm64-v8a。
+从 [v0.1.108 预览版 Release](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.108) 下载 **`kiora-companion-v0.1.108-debug.apk`**。通用 APK 约 **438 MiB**，最低 Android 8.0；模型和运行库仍有各自设备要求，MNN 当前只打包 arm64-v8a。Release 附中英文说明、安装细节和 `SHA256SUMS.txt`。
 
-按[完整构建指南](docs/app-guide.zh-CN.md#构建与运行)准备和构建，其中包含 OCR 与语音共用 ONNX Runtime 的步骤。
+此包使用 debug 签名，覆盖安装需要相同证书，更换安装前请备份需要保留的数据。如需自己构建，按[完整构建指南](docs/app-guide.zh-CN.md#构建与运行)准备，其中包含 OCR 与语音共用 ONNX Runtime 的步骤。构建产物为：
 
 ```text
 app/build/outputs/apk/debug/app-debug.apk
@@ -59,7 +59,7 @@ app/build/outputs/apk/debug/app-debug.apk
 - **本机**：导入支持的 LiteRT-LM `.litertlm` 文件，或完整 MNN 模型目录，权重复制到应用私有存储。
 - **在线**：配置兼容 Chat Completions 的提供商，需要联网使用。
 
-[ModelScope 模型合集](https://www.modelscope.cn/models/vqhvqh/kiora_model_bundles)与[模型接入说明](https://github.com/qhvssonic/kiora/blob/main/docs/on-device-models.md)提供资产及上游要求。模型权重不在 APK 中。
+[ModelScope 模型合集](https://www.modelscope.cn/models/vqhvqh/kiora_model_bundles)与[模型接入说明](https://github.com/qhvssonic/kiora/blob/main/docs/on-device-models.md)提供资产及上游要求。聊天、语音、Embedding 和人脸权重不在 APK 中；OCR 资产已打包。
 
 ### 3. 先试一个本地任务
 
