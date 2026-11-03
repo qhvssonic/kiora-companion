@@ -10,6 +10,7 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.os.Build
 import android.provider.OpenableColumns
 import android.provider.Settings as AndroidSettings
 import android.text.InputType
@@ -137,13 +138,21 @@ class SettingsActivity : Activity() {
             contentDescription = "返回"
             setOnClickListener { finish() }
         }, LinearLayout.LayoutParams(dp(38), -1))
-        top.addView(TextView(this).apply {
-            text = "连接设置"
-            textSize = 20f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(INK)
+        top.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(6), 0, 0, 0)
+            addView(TextView(this@SettingsActivity).apply {
+                text = "连接设置"
+                textSize = 20f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(INK)
+            })
+            addView(TextView(this@SettingsActivity).apply {
+                text = installedVersionLabel()
+                textSize = 11f
+                setTextColor(MUTED)
+            })
         }, LinearLayout.LayoutParams(0, -1, 1f))
         top.addView(TextView(this).apply {
             text = "保存"
@@ -292,6 +301,14 @@ class SettingsActivity : Activity() {
         if (intent.getBooleanExtra("focus_tts", false)) {
             scroll.post { scroll.smoothScrollTo(0, (ttsModelValue.parent as View).top - dp(24)) }
         }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun installedVersionLabel(): String {
+        val info = packageManager.getPackageInfo(packageName, 0)
+        val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode
+            else info.versionCode.toLong()
+        return "版本 ${info.versionName.orEmpty()} ($code)"
     }
 
     private fun section(parent: LinearLayout, title: String) {

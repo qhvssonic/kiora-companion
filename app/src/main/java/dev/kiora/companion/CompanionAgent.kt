@@ -106,6 +106,8 @@ class CompanionAgent(
     private var runtime: AgentRuntime? = null
     private var localModel: LiteRtModelPort? = null
     private var mnnModel: MnnModelPort? = null
+    private val modelResources = ModelResourceSlot<ChatModelKey, ModelPort>(::closeChatModel)
+    private var configuredConfig: CompanionConfig? = null
     @Volatile private var remoteTurn: RemoteTurn? = null
     private val sendLock = Mutex()
     private var activeAttachments: AttachmentTurn? = null
@@ -128,11 +130,15 @@ class CompanionAgent(
     val targetName: String get() = connections.values.singleOrNull()?.name ?: "A2A Agent"
     val hasDesktop: Boolean get() = connections.isNotEmpty()
     val hasModel: Boolean get() = runtime != null
+    internal fun canReuseModel(config: CompanionConfig): Boolean = modelResources.matches(config.chatModelKey())
     fun markLocalInput(sessionId: String, source: String) = provenance.mark(sessionId, source)
     fun hasUnavailableA2aConnections(config: CompanionConfig): Boolean =
         config.a2aConnections.any { it.enabled && it.id !in connections }
 
-    suspend fun configure(config: CompanionConfig): String = sendLock.withLock {
+    suspend fun configure(config: CompanionConfig, refreshConnections: Boolean = false): String = sendLock.withLock {
+        if (runtime != null && configuredConfig == config && canReuseModel(config) && !refreshConnections) {
+            return@withLock readyStatus()
+        }
         egress.clear()
         val usesLiteRt = config.providerId == "litert"
         val usesMnn = config.providerId == "mnn"
@@ -144,66 +150,38 @@ class CompanionAgent(
             "请先配置模型；电脑端 A2A 只提供工具"
         }
         val discovered = linkedMapOf<String, A2aAgentConnection>()
-        var failedConnections = 0
-        val discovery = supervisorScope {
-            config.a2aConnections.filter { it.enabled }.map { profile ->
-                async(Dispatchers.IO) { profile to try {
-                    A2aPeerConnector.discoverConnection(
-                        agentCardUrl = profile.agentCardUrl,
-                        bearerToken = { profile.token.ifBlank { null } },
-                        rewriteLoopbackHost = true,
-                    ).copy(name = profile.name)
-                } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) {
-                    null
-                } }
-            }.awaitAll()
-        }
-        for ((profile, connection) in discovery) {
-            if (connection != null) {
-                discovered[profile.id] = connection
-            } else {
-                failedConnections++
+        if (configuredConnections == config.a2aConnections && !refreshConnections) {
+            discovered.putAll(connections)
+        } else {
+            val discovery = supervisorScope {
+                config.a2aConnections.filter { it.enabled }.map { profile ->
+                    async(Dispatchers.IO) { profile to try {
+                        A2aPeerConnector.discoverConnection(
+                            agentCardUrl = profile.agentCardUrl,
+                            bearerToken = { profile.token.ifBlank { null } },
+                            rewriteLoopbackHost = true,
+                        ).copy(name = profile.name)
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        null
+                    } }
+                }.awaitAll()
+            }
+            for ((profile, connection) in discovery) {
+                if (connection != null) discovered[profile.id] = connection
             }
         }
+        val modelKey = config.chatModelKey()
+        val reusingModel = modelResources.matches(modelKey)
         runtime = null
-        localModel?.close()
-        mnnModel?.close()
-        localModel = null
-        mnnModel = null
-        val model: ModelPort? = when {
-            usesLiteRt -> LiteRtModelPort(
-                modelFile = File(config.localModelPath),
-                backend = if (config.localBackend == "gpu") LiteRtBackend.GPU else LiteRtBackend.CPU,
-                cacheDirectory = File(appContext.cacheDir, "litert"),
-                enableVision = true,
-            )
-            usesMnn -> MnnModelPort(File(config.mnnConfigPath))
-            config.modelUrl.isNotBlank() && config.modelId.isNotBlank() -> {
-                val providerId = config.providerId.ifBlank { ProviderCatalog.infer(config.modelUrl).id }
-                CompatibleModelProviders(listOf(CompatibleProvider(
-                    id = providerId,
-                    displayName = ProviderCatalog.byId(providerId).name,
-                    endpoint = config.modelUrl,
-                    model = config.modelId,
-                    requestStreamingUsage = providerId == "openai" || providerId == "deepseek",
-                )), { config.apiKey.ifBlank { null } })
-            }
-            else -> null
+        configuredConfig = null
+        if (!reusingModel) {
+            localModel = null
+            mnnModel = null
         }
-        requireNotNull(model) { "请先配置模型；电脑端 A2A 只提供工具" }
+        val model = modelResources.getOrLoad(modelKey) { loadChatModel(config) }
         try {
-            when (model) {
-                is LiteRtModelPort -> {
-                    onStatus("正在加载本地模型…")
-                    InferenceResources.withInference("chat-load") { model.prepare() }
-                }
-                is MnnModelPort -> {
-                    onStatus("正在加载 MNN 本地模型…")
-                    InferenceResources.withInference("chat-load") { model.prepare() }
-                }
-            }
             val remoteSkills = config.a2aConnections.flatMap { profile ->
                 discovered[profile.id]?.skillTools(
                     fileLoader = ::loadSkillFiles,
@@ -316,18 +294,65 @@ class CompanionAgent(
             configuredConnections = config.a2aConnections
             remoteSkillsByToolName = remoteSkills.associateBy { it.tool.definition.name }
             runtime = agent
-            when {
-                discovered.isNotEmpty() -> "模型就绪 · ${discovered.size} 个 A2A Agent 已连接" +
-                    if (failedConnections > 0) "（${failedConnections} 个暂不可用）" else ""
-                failedConnections > 0 -> "模型就绪 · A2A Agent 暂不可用"
-                else -> "模型就绪"
-            }
+            configuredConfig = config
+            readyStatus()
         } catch (failure: Throwable) {
-            // A failed or cancelled configuration must not leave model weights resident.
-            withContext(kotlinx.coroutines.NonCancellable) {
-                (model as? LiteRtModelPort)?.close()
-                (model as? MnnModelPort)?.close()
+            // Dispose new weights on failure; a reused model remains owned by this agent.
+            if (!reusingModel) {
+                modelResources.close()
+                localModel = null
+                mnnModel = null
             }
+            throw failure
+        }
+    }
+
+    private fun readyStatus(): String {
+        val failed = configuredConnections.count { it.enabled && it.id !in connections }
+        return when {
+            connections.isNotEmpty() -> "模型就绪 · ${connections.size} 个 A2A Agent 已连接" +
+                if (failed > 0) "（${failed} 个暂不可用）" else ""
+            failed > 0 -> "模型就绪 · A2A Agent 暂不可用"
+            else -> "模型就绪"
+        }
+    }
+
+    private suspend fun closeChatModel(model: ModelPort) = withContext(Dispatchers.IO) {
+        when (model) {
+            is LiteRtModelPort -> model.close()
+            is MnnModelPort -> model.close()
+            else -> Unit
+        }
+    }
+
+    private suspend fun loadChatModel(config: CompanionConfig): ModelPort {
+        val model: ModelPort = when (config.providerId) {
+            "litert" -> LiteRtModelPort(File(config.localModelPath),
+                backend = if (config.localBackend == "gpu") LiteRtBackend.GPU else LiteRtBackend.CPU,
+                cacheDirectory = File(appContext.cacheDir, "litert"), enableVision = true)
+            "mnn" -> MnnModelPort(File(config.mnnConfigPath))
+            else -> {
+                val providerId = config.providerId.ifBlank { ProviderCatalog.infer(config.modelUrl).id }
+                CompatibleModelProviders(listOf(CompatibleProvider(id = providerId,
+                    displayName = ProviderCatalog.byId(providerId).name, endpoint = config.modelUrl,
+                    model = config.modelId, requestStreamingUsage = providerId == "openai" || providerId == "deepseek")),
+                    { config.apiKey.ifBlank { null } })
+            }
+        }
+        try {
+            when (model) {
+                is LiteRtModelPort -> {
+                    onStatus("正在加载本地模型…")
+                    InferenceResources.withInference("chat-load") { model.prepare() }
+                }
+                is MnnModelPort -> {
+                    onStatus("正在加载 MNN 本地模型…")
+                    InferenceResources.withInference("chat-load") { model.prepare() }
+                }
+            }
+            return model
+        } catch (failure: Throwable) {
+            withContext(kotlinx.coroutines.NonCancellable) { closeChatModel(model) }
             throw failure
         }
     }
@@ -335,10 +360,13 @@ class CompanionAgent(
     suspend fun close() = sendLock.withLock {
         egress.clear()
         runtime = null
-        localModel?.close()
-        mnnModel?.close()
+        configuredConfig = null
         localModel = null
         mnnModel = null
+        connections = emptyMap()
+        configuredConnections = emptyList()
+        remoteSkillsByToolName = emptyMap()
+        modelResources.close()
     }
 
     suspend fun send(sessionId: String, instruction: String, selected: List<Uri>,

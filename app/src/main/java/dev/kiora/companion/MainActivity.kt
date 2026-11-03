@@ -1813,8 +1813,9 @@ class MainActivity : Activity() {
             }
             if (resultCode == RESULT_OK) allowedToolsByConversation.clear()
             updateModelIndicator()
-            if (config != activeConfig || agent.hasUnavailableA2aConnections(config)) {
-                startConnection(config)
+            val retryA2a = resultCode == RESULT_OK && agent.hasUnavailableA2aConnections(config)
+            if (config != activeConfig || !agent.hasModel || !agent.canReuseModel(config) || retryA2a) {
+                startConnection(config, refreshConnections = retryA2a)
             } else if (resultCode == RESULT_OK) {
                 status.text = "设置已保存"
             }
@@ -2195,16 +2196,19 @@ class MainActivity : Activity() {
         )
     }
 
-    private fun startConnection(config: CompanionConfig) {
+    private fun startConnection(config: CompanionConfig, refreshConnections: Boolean = false) {
+        if (!refreshConnections && config == activeConfig && modelReady &&
+            agent.hasModel && agent.canReuseModel(config)) return
         val request = ++connectionRequest
+        val reuseModel = modelReady && agent.canReuseModel(config)
         connecting = true
-        modelReady = false
-        status.text = "正在连接…"
+        modelReady = reuseModel
+        status.text = if (reuseModel) "正在更新 A2A 与会话配置…" else "正在连接…"
         scope.launch {
             connectMutex.withLock {
                 if (request != connectionRequest) return@withLock
                 try {
-                    val ready = agent.configure(config)
+                    val ready = agent.configure(config, refreshConnections)
                     if (request != connectionRequest) return@withLock
                     if (activeConfig != config) allowedToolsByConversation.clear()
                     activeConfig = config
@@ -2215,10 +2219,12 @@ class MainActivity : Activity() {
                     throw cancelled
                 } catch (error: LinkageError) {
                     if (request == connectionRequest) {
+                        modelReady = false
                         status.text = "本机模型运行库不兼容：${error.message ?: "请更新应用"}"
                     }
                 } catch (error: Exception) {
                     if (request == connectionRequest) {
+                        modelReady = false
                         status.text = "连接失败：${error.message ?: "请检查地址"}"
                     }
                 } finally {
