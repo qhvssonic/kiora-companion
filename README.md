@@ -20,11 +20,13 @@ Companion is the application; **[Kiora](https://github.com/qhvssonic/kiora) is t
 
 ## Demo
 
-[![Kiora Companion demo: documents, A2A handoff and semantic photo search](assets/kiora-demo-cover.jpg)](https://github.com/qhvssonic/kiora-companion/releases/download/v0.1.108/kiora-demo-zh-subtitles.mp4)
+[![Kiora Companion demo: documents, A2A handoff and semantic photo search](assets/kiora-demo-cover.jpg)](https://www.bilibili.com/video/BV1txn26eEo2/)
 
-**[▶ Watch / download the demo](https://github.com/qhvssonic/kiora-companion/releases/download/v0.1.108/kiora-demo-zh-subtitles.mp4)** · 3m 28s · Chinese subtitles · 4K MP4, ~203 MiB
+**[▶ Watch on Bilibili](https://www.bilibili.com/video/BV1txn26eEo2/)** · ~3.5 min · Chinese subtitles
 
-Watch local inference, scanning and Markdown organization, A2A file handoff, and semantic photo search. Recorded on **2026-10-22** with an earlier build; current UI and capabilities have changed. The full video is hosted as a Release asset; click the cover or link to open/download it.
+[Download the original 4K MP4 (~203 MiB)](https://github.com/qhvssonic/kiora-companion/releases/download/v0.1.108/kiora-demo-zh-subtitles.mp4)
+
+Watch local inference, scanning and Markdown organization, A2A file handoff, and semantic photo search. Recorded on **2026-10-22** with an earlier build; current UI and capabilities have changed.
 
 ## What you can do
 

@@ -20,11 +20,13 @@ Companion 是应用，**[Kiora](https://github.com/qhvssonic/kiora) 是可复用
 
 ## 演示视频
 
-[![Kiora Companion 演示：文档整理、A2A 交付与相册语义搜索](assets/kiora-demo-cover.jpg)](https://github.com/qhvssonic/kiora-companion/releases/download/v0.1.108/kiora-demo-zh-subtitles.mp4)
+[![Kiora Companion 演示：文档整理、A2A 交付与相册语义搜索](assets/kiora-demo-cover.jpg)](https://www.bilibili.com/video/BV1txn26eEo2/)
 
-**[▶ 观看／下载字幕版演示](https://github.com/qhvssonic/kiora-companion/releases/download/v0.1.108/kiora-demo-zh-subtitles.mp4)** · 3 分 28 秒 · 中文字幕 · 4K MP4，约 203 MiB
+**[▶ 在 B 站在线观看](https://www.bilibili.com/video/BV1txn26eEo2/)** · 约 3 分半 · 中文字幕
 
-展示端侧推理、扫描整理 Markdown、A2A 文件交付和相册语义搜索。视频于 **2026-10-22** 录制，展示较早版本，当前界面与能力已有更新。原片作为 Release 附件保存，点击封面或链接打开／下载。
+[下载 4K 原片（约 203 MiB）](https://github.com/qhvssonic/kiora-companion/releases/download/v0.1.108/kiora-demo-zh-subtitles.mp4)
+
+展示端侧推理、扫描整理 Markdown、A2A 文件交付和相册语义搜索。视频于 **2026-10-22** 录制，展示较早版本，当前界面与能力已有更新。
 
 ## 可以做什么
 
