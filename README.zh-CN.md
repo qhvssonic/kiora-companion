@@ -4,19 +4,19 @@
 
 **在 Android 上用本地模型处理文档、照片和语音，并通过 A2A 与其他智能体协作。**
 
-基于 [Kiora SDK](https://github.com/qhvssonic/kiora) · 预览 APK 0.1.108 · Android 8.0+
+基于 [Kiora SDK](https://github.com/qhvssonic/kiora) · 预览 APK 0.1.109 · Android 8.0+
 
 [English](README.md) | **简体中文**
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-[下载 APK](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.108) · [演示视频](#演示视频) · [可以做什么](#可以做什么) · [开始体验](#开始体验) · [构建指南](docs/app-guide.zh-CN.md#构建与运行) · [Kiora SDK](https://github.com/qhvssonic/kiora) · [问题反馈](https://github.com/qhvssonic/kiora-companion/issues)
+[下载 APK](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.109) · [演示视频](#演示视频) · [可以做什么](#可以做什么) · [开始体验](#开始体验) · [构建指南](docs/app-guide.zh-CN.md#构建与运行) · [Kiora SDK](https://github.com/qhvssonic/kiora) · [问题反馈](https://github.com/qhvssonic/kiora-companion/issues)
 
 扫描并整理文档，按描述寻找照片，用语音输入消息，或在本机朗读回答。需要其他智能体继续处理时，再通过 A2A 连接，并确认哪些内容可以离开手机。
 
 Companion 是应用，**[Kiora](https://github.com/qhvssonic/kiora) 是可复用的 Kotlin SDK**。A2A 对端可以运行在服务器、其他设备或业务系统中；当前集成示例使用电脑上的 DSH。
 
-> 当前处于实验阶段，可从 [Release](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.108) 下载 debug 签名预览 APK。聊天、语音、Embedding 和人脸模型需单独导入，本包已含 OCR 资产。选择在线聊天模型时，普通聊天输入会发送给该提供商；离线聊天需选择本机模型。
+> 当前处于实验阶段，可从 [Release](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.109) 下载 debug 签名预览 APK。聊天、语音、Embedding 和人脸模型需单独导入，本包已含 OCR 资产。选择在线聊天模型时，普通聊天输入会发送给该提供商；离线聊天需选择本机模型。
 
 ## 演示视频
 
@@ -56,7 +56,7 @@ flowchart LR
 
 ### 1. 安装预览 APK
 
-从 [v0.1.108 预览版 Release](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.108) 下载 **`kiora-companion-v0.1.108-debug.apk`**。通用 APK 约 **438 MiB**，最低 Android 8.0；模型和运行库仍有各自设备要求，MNN 当前只打包 arm64-v8a。Release 附中英文说明、安装细节和 `SHA256SUMS.txt`。
+从 [v0.1.109 预览版 Release](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.109) 下载 **`kiora-companion-v0.1.109-debug.apk`**。通用 APK 约 **439 MiB**，最低 Android 8.0；模型和运行库仍有各自设备要求，MNN 当前只打包 arm64-v8a。Release 附中英文说明、安装细节和 `SHA256SUMS.txt`。
 
 此包使用 debug 签名，覆盖安装需要相同证书，更换安装前请备份需要保留的数据。如需自己构建，按[完整构建指南](docs/app-guide.zh-CN.md#构建与运行)准备，其中包含 OCR 与语音共用 ONNX Runtime 的步骤。构建产物为：
 
@@ -97,9 +97,9 @@ A2A 是可选配置。有可访问的对端后，再在设置中添加 Agent Car
 
 ## 当前状态与计划
 
-当前源码 **0.1.109** 在设置和其他页面往返时复用已就绪聊天模型；A2A 重试或上下文预算变更不再无条件重载权重，实际更换模型/后端时仍会替换实例。见[生命周期与验证说明](docs/model-lifecycle.md)。上方可下载预览版仍为 0.1.108，等待下一次发布更新。
+**0.1.109** 在设置和其他页面往返时复用已就绪聊天模型；A2A 重试或上下文预算变更不再无条件重载权重，实际更换模型/后端时仍会替换实例。见[生命周期与验证说明](docs/model-lifecycle.md)。
 
-**2026-11-03 本地验证**：Companion 67 项 JVM 测试和 0.1.108 调试构建通过。此前在 V2509A / Android 16 上覆盖了来源/授权、语音生命周期和 20 轮混合模型循环。这些是限定条件下的记录，不代表所有设备兼容或模型准确率保证。
+**2026-11-03 本地验证**：Companion 72 项 JVM 测试和 0.1.109 调试构建通过，V2509A / Android 16 导航模型复用回归通过。此前在 V2509A / Android 16 上覆盖了来源/授权、语音生命周期和 20 轮混合模型循环。这些是限定条件下的记录，不代表所有设备兼容或模型准确率保证。
 
 已知限制：
 

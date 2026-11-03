@@ -4,7 +4,7 @@ English and Chinese issues are welcome. The app is experimental; small reproduci
 
 ## Try the app first
 
-- Download the [preview APK](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.108) and read its model/import requirements.
+- Download the [preview APK](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.109) and read its model/import requirements.
 - Watch the [demo](https://www.bilibili.com/video/BV1txn26eEo2/) for the intended document/photo workflows; it shows an earlier build.
 - Use the device/model report form for both successful and failed setups. Only claim the behavior you observed on the configuration you describe.
 

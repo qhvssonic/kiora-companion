@@ -4,19 +4,19 @@
 
 **An Android agent app for local documents, photos, voice, and A2A collaboration.**
 
-Built with [Kiora SDK](https://github.com/qhvssonic/kiora) · Preview APK 0.1.108 · Android 8.0+
+Built with [Kiora SDK](https://github.com/qhvssonic/kiora) · Preview APK 0.1.109 · Android 8.0+
 
 **English** | [简体中文](README.zh-CN.md)
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-[Download APK](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.108) · [Demo](#demo) · [What you can do](#what-you-can-do) · [Get started](#get-started) · [Build guide](docs/app-guide.en.md#build-and-run) · [Kiora SDK](https://github.com/qhvssonic/kiora) · [Feedback](https://github.com/qhvssonic/kiora-companion/issues)
+[Download APK](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.109) · [Demo](#demo) · [What you can do](#what-you-can-do) · [Get started](#get-started) · [Build guide](docs/app-guide.en.md#build-and-run) · [Kiora SDK](https://github.com/qhvssonic/kiora) · [Feedback](https://github.com/qhvssonic/kiora-companion/issues)
 
 Scan a document, find a photo by description, dictate a message, or listen to a reply using local models. When a task needs another agent, connect over A2A and approve what leaves the phone.
 
 Companion is the application; **[Kiora](https://github.com/qhvssonic/kiora) is the reusable Kotlin SDK** behind it. Its A2A peers can run on a server, another device, or a business system. The current integration example uses DSH on a computer.
 
-> Experimental preview: an installable debug-signed APK is available in [Releases](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.108). Chat, speech, embedding and face models are imported separately; this APK includes OCR assets. Choosing an online chat model sends ordinary chat input to that provider; use a local model for offline chat.
+> Experimental preview: an installable debug-signed APK is available in [Releases](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.109). Chat, speech, embedding and face models are imported separately; this APK includes OCR assets. Choosing an online chat model sends ordinary chat input to that provider; use a local model for offline chat.
 
 ## Demo
 
@@ -56,7 +56,7 @@ flowchart LR
 
 ### 1. Install the preview APK
 
-Download **`kiora-companion-v0.1.108-debug.apk`** from the [v0.1.108 preview release](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.108). The universal APK is approximately **438 MiB** and supports Android 8.0+; model/runtime requirements vary by device. MNN currently packages arm64-v8a only. The release includes bilingual notes, installation details and `SHA256SUMS.txt`.
+Download **`kiora-companion-v0.1.109-debug.apk`** from the [v0.1.109 preview release](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.109). The universal APK is approximately **439 MiB** and supports Android 8.0+; model/runtime requirements vary by device. MNN currently packages arm64-v8a only. The release includes bilingual notes, installation details and `SHA256SUMS.txt`.
 
 The APK is debug-signed: an in-place update requires the same signing certificate. Back up data you need before changing installations. To build it yourself, follow the [full build guide](docs/app-guide.en.md#build-and-run) or [中文构建指南](docs/app-guide.zh-CN.md#构建与运行), including the shared ONNX Runtime preparation for OCR and speech. The build output is:
 
@@ -97,9 +97,9 @@ A2A setup is optional. Add an Agent Card URL in settings only when you have a re
 
 ## Status and roadmap
 
-Current source **0.1.109** reuses a ready chat model across settings and other screens. A2A retries and context-budget changes no longer unconditionally reload model weights; changing the actual model/backend still replaces the instance. See [lifecycle and validation](docs/model-lifecycle.md). The downloadable preview linked above remains 0.1.108 until the next release.
+**0.1.109** reuses a ready chat model across settings and other screens. A2A retries and context-budget changes no longer unconditionally reload model weights; changing the actual model/backend still replaces the instance. See [lifecycle and validation](docs/model-lifecycle.md).
 
-**Local validation, 2026-11-03:** 67 Companion JVM tests and the 0.1.108 debug build passed. Earlier V2509A / Android 16 testing covered source/approval flows, voice lifecycle, and 20 mixed-model rounds. Those are scoped observations, not universal device support or a guarantee of model accuracy.
+**Local validation, 2026-11-03:** 72 Companion JVM tests and the 0.1.109 debug build passed; navigation model reuse was verified on V2509A / Android 16. Earlier V2509A / Android 16 testing covered source/approval flows, voice lifecycle, and 20 mixed-model rounds. Those are scoped observations, not universal device support or a guarantee of model accuracy.
 
 Known limits:
 

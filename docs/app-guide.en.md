@@ -4,7 +4,7 @@
 
 **English** | [简体中文](app-guide.zh-CN.md)
 
-Kiora Companion is an Android host application built on the [Kiora SDK](https://github.com/qhvssonic/kiora). The current app version is **0.1.108** and uses SDK **`0.3.0-SNAPSHOT`**. It brings on-device models, document scanning, gallery search, local tools, authorization, and A2A collaboration into one conversation. The demonstration uses a computer-hosted DSH agent, but A2A peers are not limited to computers.
+Kiora Companion is an Android host application built on the [Kiora SDK](https://github.com/qhvssonic/kiora). The current app version is **0.1.109** and uses SDK **`0.3.0-SNAPSHOT`**. It brings on-device models, document scanning, gallery search, local tools, authorization, and A2A collaboration into one conversation. The demonstration uses a computer-hosted DSH agent, but A2A peers are not limited to computers.
 
 The code is licensed under [Apache-2.0](../LICENSE). Model weights, native AARs, and the DSH plugin have separate upstream licenses.
 
