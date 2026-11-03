@@ -10,13 +10,21 @@
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-[下载 APK](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.108) · [可以做什么](#可以做什么) · [开始体验](#开始体验) · [构建指南](docs/app-guide.zh-CN.md#构建与运行) · [Kiora SDK](https://github.com/qhvssonic/kiora) · [问题反馈](https://github.com/qhvssonic/kiora-companion/issues)
+[下载 APK](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.108) · [演示视频](#演示视频) · [可以做什么](#可以做什么) · [开始体验](#开始体验) · [构建指南](docs/app-guide.zh-CN.md#构建与运行) · [Kiora SDK](https://github.com/qhvssonic/kiora) · [问题反馈](https://github.com/qhvssonic/kiora-companion/issues)
 
 扫描并整理文档，按描述寻找照片，用语音输入消息，或在本机朗读回答。需要其他智能体继续处理时，再通过 A2A 连接，并确认哪些内容可以离开手机。
 
 Companion 是应用，**[Kiora](https://github.com/qhvssonic/kiora) 是可复用的 Kotlin SDK**。A2A 对端可以运行在服务器、其他设备或业务系统中；当前集成示例使用电脑上的 DSH。
 
 > 当前处于实验阶段，可从 [Release](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.108) 下载 debug 签名预览 APK。聊天、语音、Embedding 和人脸模型需单独导入，本包已含 OCR 资产。选择在线聊天模型时，普通聊天输入会发送给该提供商；离线聊天需选择本机模型。
+
+## 演示视频
+
+[![Kiora Companion 演示：文档整理、A2A 交付与相册语义搜索](assets/kiora-demo-cover.jpg)](https://github.com/qhvssonic/kiora-companion/releases/download/v0.1.108/kiora-demo-zh-subtitles.mp4)
+
+**[▶ 观看／下载字幕版演示](https://github.com/qhvssonic/kiora-companion/releases/download/v0.1.108/kiora-demo-zh-subtitles.mp4)** · 3 分 28 秒 · 中文字幕 · 4K MP4，约 203 MiB
+
+展示端侧推理、扫描整理 Markdown、A2A 文件交付和相册语义搜索。视频于 **2026-10-22** 录制，展示较早版本，当前界面与能力已有更新。原片作为 Release 附件保存，点击封面或链接打开／下载。
 
 ## 可以做什么
 

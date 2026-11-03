@@ -10,13 +10,21 @@ Built with [Kiora SDK](https://github.com/qhvssonic/kiora) · App 0.1.108 · And
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-[Download APK](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.108) · [What you can do](#what-you-can-do) · [Get started](#get-started) · [Build guide](docs/app-guide.en.md#build-and-run) · [Kiora SDK](https://github.com/qhvssonic/kiora) · [Feedback](https://github.com/qhvssonic/kiora-companion/issues)
+[Download APK](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.108) · [Demo](#demo) · [What you can do](#what-you-can-do) · [Get started](#get-started) · [Build guide](docs/app-guide.en.md#build-and-run) · [Kiora SDK](https://github.com/qhvssonic/kiora) · [Feedback](https://github.com/qhvssonic/kiora-companion/issues)
 
 Scan a document, find a photo by description, dictate a message, or listen to a reply using local models. When a task needs another agent, connect over A2A and approve what leaves the phone.
 
 Companion is the application; **[Kiora](https://github.com/qhvssonic/kiora) is the reusable Kotlin SDK** behind it. Its A2A peers can run on a server, another device, or a business system. The current integration example uses DSH on a computer.
 
 > Experimental preview: an installable debug-signed APK is available in [Releases](https://github.com/qhvssonic/kiora-companion/releases/tag/v0.1.108). Chat, speech, embedding and face models are imported separately; this APK includes OCR assets. Choosing an online chat model sends ordinary chat input to that provider; use a local model for offline chat.
+
+## Demo
+
+[![Kiora Companion demo: documents, A2A handoff and semantic photo search](assets/kiora-demo-cover.jpg)](https://github.com/qhvssonic/kiora-companion/releases/download/v0.1.108/kiora-demo-zh-subtitles.mp4)
+
+**[▶ Watch / download the demo](https://github.com/qhvssonic/kiora-companion/releases/download/v0.1.108/kiora-demo-zh-subtitles.mp4)** · 3m 28s · Chinese subtitles · 4K MP4, ~203 MiB
+
+Watch local inference, scanning and Markdown organization, A2A file handoff, and semantic photo search. Recorded on **2026-10-22** with an earlier build; current UI and capabilities have changed. The full video is hosted as a Release asset; click the cover or link to open/download it.
 
 ## What you can do
 
